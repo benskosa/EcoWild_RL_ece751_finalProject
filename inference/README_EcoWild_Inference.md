@@ -52,6 +52,9 @@ is not included due to size constraints.
 
 Please download it from: https://uwprod-my.sharepoint.com/:x:/g/personal/nyildirim_wisc_edu/IQBCAUzZMYE-SI-KK7-mU5cWAf8gtLMX-ENsK9bLF0sMiSs?e=nZwqKk 
 
+The image dataset is available on the cloud. You can try downloading it from here:
+https://www.dropbox.com/scl/fi/3q2sa0cko0mxlgqmz3i5l/dataset_grouped.tar?rlkey=luwrweslqbi1fc9aacswgfcns&e=1&st=9no1ahaw&dl=0
+
 ------------------------------------------------------------------------
 
 ## Energy-Aware System Modeling

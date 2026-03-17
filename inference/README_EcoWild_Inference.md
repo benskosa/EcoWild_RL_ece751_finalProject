@@ -55,6 +55,9 @@ Please download it from: https://uwprod-my.sharepoint.com/:x:/g/personal/nyildir
 The image dataset is available on the cloud. You can try downloading it from here:
 https://www.dropbox.com/scl/fi/3q2sa0cko0mxlgqmz3i5l/dataset_grouped.tar?rlkey=luwrweslqbi1fc9aacswgfcns&e=1&st=9no1ahaw&dl=0
 
+The smoke detection model code (training and inference) here:
+https://uwprod-my.sharepoint.com/my?id=%2Fpersonal%2Fnyildirim%5Fwisc%5Fedu%2FDocuments%2FWILDFIRE%5Fcode%2Ezip&parent=%2Fpersonal%2Fnyildirim%5Fwisc%5Fedu%2FDocuments&ga=1
+
 ------------------------------------------------------------------------
 
 ## Energy-Aware System Modeling

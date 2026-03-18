@@ -17,3 +17,9 @@ __pycache__/
 
 # Logs
 *.log
+
+# model weights
+*.trt
+*.pt
+*.pth
+*.onnx

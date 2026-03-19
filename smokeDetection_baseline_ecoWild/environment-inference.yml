@@ -1,0 +1,46 @@
+# ============================================================
+# environment-inference.yml
+# micromamba environment for energy_eval.py only.
+#
+# Create with:
+#   micromamba env create -f environment-inference.yml
+#   micromamba activate ecowild-inference
+#
+# Target platform: Jetson Orin Nano, JetPack 5.0.2 (L4T R35.1.0), Python 3.8
+# ============================================================
+
+name: ecowild-inference
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.8
+
+  # Image processing & numerics
+  # numpy<2.0 required: PyTorch 2.0.0 was released before numpy 2.0 and is not compatible with it
+  - numpy>=1.23,<2.0
+  - pillow>=9.0
+  - opencv>=4.7       # note: conda-forge name is 'opencv', not 'opencv-python'
+  - pandas>=1.5
+
+  # YOLOv8 (available on conda-forge)
+  - ultralytics>=8.0
+
+  # pip-managed packages
+  - pip
+  - pip:
+    # PyTorch — conda-forge builds lack CUDA support for Jetson's ARM architecture.
+    # After env creation, reinstall with the NVIDIA Jetson wheel for JetPack 5.0.2:
+    #
+    #   pip install torch==2.0.0 torchvision==0.15.2 \
+    #     --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/pytorch/
+    #
+    # The lines below install CPU-only builds as a placeholder on non-Jetson machines.
+    - torch==2.0.0
+    - torchvision==0.15.2
+
+    # Jetson-only (uncomment on the board):
+    # - jetson-stats    # optional: jtop power API; energy_eval.py falls back to
+    #                   # tegrastats automatically if not installed

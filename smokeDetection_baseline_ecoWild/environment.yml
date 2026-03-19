@@ -41,15 +41,12 @@ dependencies:
   # pip-managed packages
   - pip
   - pip:
-    # PyTorch — conda-forge builds lack CUDA support for Jetson's ARM architecture.
-    # After env creation, reinstall with the NVIDIA Jetson wheel for JetPack 5.0.2:
+    # PyTorch is NOT installed here — the standard pip wheel has no CUDA support
+    # for Jetson's ARM architecture and will conflict with torchvision.
+    # After running `micromamba env create`, activate the env and run:
     #
     #   pip install torch==2.0.0 torchvision==0.15.2 \
     #     --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/pytorch/
-    #
-    # The lines below install CPU-only builds as a placeholder on non-Jetson machines.
-    - torch==2.0.0
-    - torchvision==0.15.2
 
     # On Jetson, replace onnxruntime above with the NVIDIA GPU-accelerated wheel:
     #

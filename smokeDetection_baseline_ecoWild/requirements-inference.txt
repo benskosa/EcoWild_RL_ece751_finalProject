@@ -1,0 +1,29 @@
+# ============================================================
+# requirements-inference.txt
+# Dependencies for energy_eval.py only.
+# Install with:  pip install -r requirements-inference.txt
+#
+# Target platform: Jetson Orin Nano, JetPack 6.x, Python 3.10+
+# ============================================================
+
+# NOTE: On Jetson, install PyTorch/torchvision from the NVIDIA
+#       wheel index rather than PyPI:
+#
+#   pip install torch torchvision \
+#     --index-url https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/
+torch>=2.1
+torchvision>=0.16
+
+ultralytics>=8.0    # YOLOv8 (.pt weights)
+Pillow>=9.0
+numpy>=1.23
+opencv-python>=4.7
+pandas>=2.0
+
+# ------------------------------------------------------------
+# Jetson-specific  (install on the board only)
+# ------------------------------------------------------------
+# jetson-stats — optional; provides the jtop Python API for
+#   power monitoring. If not installed, energy_eval.py falls
+#   back to tegrastats automatically (no install needed).
+#   pip install jetson-stats

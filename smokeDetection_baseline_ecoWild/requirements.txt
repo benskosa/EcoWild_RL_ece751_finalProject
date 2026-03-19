@@ -1,0 +1,62 @@
+# ============================================================
+# smokeDetection_baseline_ecoWild — Python dependencies
+# Target platform: Jetson Orin Nano, JetPack 6.x, Python 3.10+
+# ============================================================
+
+# ------------------------------------------------------------
+# Core ML
+# NOTE: On Jetson, install PyTorch/torchvision from the NVIDIA
+#       wheel index rather than PyPI:
+#
+#   pip install torch torchvision \
+#     --index-url https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/
+#
+# The lines below let non-Jetson machines (e.g. a dev laptop)
+# install standard builds for code editing / testing.
+# ------------------------------------------------------------
+torch>=2.1
+torchvision>=0.16
+
+# ------------------------------------------------------------
+# Model serving
+# ------------------------------------------------------------
+ultralytics>=8.0          # YOLOv8 (.pt weights + training)
+onnx>=1.14                # ONNX model export / inspection
+# NOTE: On Jetson use the NVIDIA-built onnxruntime-gpu wheel:
+#   pip install onnxruntime-gpu \
+#     --index-url https://developer.download.nvidia.com/compute/redist/jp/v61/onnxruntime/
+onnxruntime>=1.16         # falls back to CPU on non-Jetson
+
+# TensorRT and PyCUDA ship with JetPack and are NOT on PyPI.
+# On Jetson they are already available system-wide after JetPack install.
+# For reference the packages are:
+#   tensorrt       (from JetPack / NVIDIA SDK)
+#   pycuda>=2022.1 (pip install pycuda  — needs CUDA headers)
+
+# ------------------------------------------------------------
+# Image processing & numerics
+# ------------------------------------------------------------
+Pillow>=9.0
+numpy>=1.23
+opencv-python>=4.7
+
+# ------------------------------------------------------------
+# Data handling & utilities
+# ------------------------------------------------------------
+pandas>=2.0
+tqdm>=4.65
+PyYAML>=6.0               # used in yolov8_training.py
+scikit-learn>=1.3         # used in Train/simple_resnet.py
+matplotlib>=3.7           # used in Train/simple_resnet.py
+
+# ------------------------------------------------------------
+# Jetson-specific  (install on the board only)
+# ------------------------------------------------------------
+# Jetson.GPIO — GPIO control used in the original inference scripts
+#   pip install Jetson.GPIO
+#
+# jetson-stats — optional; provides jtop Python API used in
+#                energy_eval.py for more accurate power readings
+#                than tegrastats (tegrastats is always available
+#                without installing anything).
+#   pip install jetson-stats

@@ -23,3 +23,7 @@ __pycache__/
 *.pt
 *.pth
 *.onnx
+
+# Claude Code
+.claude/worktrees/
+.claude/settings.local.json

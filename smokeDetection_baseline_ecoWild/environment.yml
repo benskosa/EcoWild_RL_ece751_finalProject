@@ -38,24 +38,21 @@ dependencies:
   - scikit-learn>=1.3 # used in Train/simple_resnet.py
   - matplotlib>=3.7   # used in Train/simple_resnet.py
 
-  # pip-managed packages
-  - pip
-  - pip:
-    # PyTorch is NOT installed here — the standard pip wheel has no CUDA support
-    # for Jetson's ARM architecture and will conflict with torchvision.
-    # After running `micromamba env create`, activate the env and run:
-    #
-    #   pip install torch==2.0.0 torchvision==0.15.2 \
-    #     --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/pytorch/
-
-    # On Jetson, replace onnxruntime above with the NVIDIA GPU-accelerated wheel:
-    #
-    #   pip install onnxruntime-gpu \
-    #     --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/onnxruntime/
-
-    # Jetson-only (uncomment on the board):
-    # - Jetson.GPIO     # GPIO control used in original inference scripts
-    # - jetson-stats    # optional: jtop power API for energy_eval.py
-
-    # TensorRT is NOT installable via pip or conda — it ships with JetPack.
-    # It will be available system-wide after JetPack installation.
+# -----------------------------------------------------------------------
+# The following must be installed MANUALLY after env creation:
+#
+# 1. PyTorch + torchvision (Jetson CUDA wheel — no ARM CUDA support in PyPI):
+#      pip install torch==2.0.0 torchvision==0.15.2 \
+#        --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/pytorch/
+#
+# 2. onnxruntime-gpu (replace the conda onnxruntime with the Jetson GPU build):
+#      pip install onnxruntime-gpu \
+#        --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/onnxruntime/
+#
+# 3. Jetson-only pip packages:
+#      pip install Jetson.GPIO    # GPIO used in original inference scripts
+#      pip install jetson-stats   # optional jtop power API for energy_eval.py
+#
+# 4. TensorRT: ships with JetPack — NOT installable via pip or conda.
+#    Available system-wide after JetPack installation.
+# -----------------------------------------------------------------------

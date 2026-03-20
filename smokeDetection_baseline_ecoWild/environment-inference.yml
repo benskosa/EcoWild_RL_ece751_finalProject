@@ -28,16 +28,15 @@ dependencies:
   # YOLOv8 (available on conda-forge)
   - ultralytics>=8.0
 
-  # pip-managed packages
-  - pip
-  - pip:
-    # PyTorch is NOT installed here — the standard pip wheel has no CUDA support
-    # for Jetson's ARM architecture and will conflict with torchvision.
-    # After running `micromamba env create`, activate the env and run:
-    #
-    #   pip install torch==2.0.0 torchvision==0.15.2 \
-    #     --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/pytorch/
-
-    # Jetson-only (uncomment on the board):
-    # - jetson-stats    # optional: jtop power API; energy_eval.py falls back to
-    #                   # tegrastats automatically if not installed
+# -----------------------------------------------------------------------
+# PyTorch must be installed MANUALLY after env creation — the standard
+# pip wheel has no CUDA support for Jetson's ARM architecture.
+# After activating the env, run:
+#
+#   pip install torch==2.0.0 torchvision==0.15.2 \
+#     --index-url https://developer.download.nvidia.com/compute/redist/jp/v50/pytorch/
+#
+# Optional Jetson power monitoring (jtop):
+#   pip install jetson-stats
+#   energy_eval.py falls back to tegrastats automatically if not installed.
+# -----------------------------------------------------------------------

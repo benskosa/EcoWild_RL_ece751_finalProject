@@ -8,6 +8,11 @@ inference/Inference/
 # Large datasets
 *.csv
 
+# Dataset images (24k+ jpg frames — never commit)
+smokeDetection_baseline_ecoWild/Dataset/
+*.jpg
+*.jpeg
+
 # Python cache
 __pycache__/
 *.pyc

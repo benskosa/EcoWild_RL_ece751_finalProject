@@ -27,7 +27,7 @@ from torchvision.models import (
     MobileNet_V3_Small_Weights,
 )
 
-from feature_extraction import make_lbp_motion_image
+from feature_extraction import make_lbp_motion_image, make_lbp_motion_image_nframes
 
 
 # ---------------------------------------------------------------------------
@@ -83,8 +83,19 @@ class SmokeDataset(Dataset):
                   ...
 
     Each video folder must contain frames named in chronological order.
-    The dataset generates one LBP-motion image per consecutive frame pair
-    within each video folder, inheriting the label of its parent class.
+
+    The dataset generates one LBP-motion image per sliding window of
+    n_frames consecutive frames (with inter-frame gap of frame_gap).
+    When n_frames=2 (default) this is the classic single-pair LBP-motion
+    image from the paper.  When n_frames>2, the n_frames-1 pairwise
+    LBP-motion images within the window are averaged into one image,
+    capturing motion over a longer temporal span.
+
+    Sliding window example with n_frames=3, frame_gap=1 on a 6-frame video:
+        window 0: (f0, f1, f2)  → avg of LBP(f0,f1) and LBP(f1,f2)
+        window 1: (f1, f2, f3)
+        window 2: (f2, f3, f4)
+        window 3: (f3, f4, f5)
 
     Alternatively, if you have pre-computed LBP-motion images already saved
     as PNG/JPG files in  root/{smoke,no_smoke}/*.png, set
@@ -94,6 +105,7 @@ class SmokeDataset(Dataset):
     def __init__(
         self,
         root: str,
+        n_frames: int = 2,
         frame_gap: int = 1,
         target_size: tuple[int, int] = (240, 180),
         transform: transforms.Compose | None = None,
@@ -103,19 +115,31 @@ class SmokeDataset(Dataset):
         Parameters
         ----------
         root        : path to dataset root (must contain smoke/ and no_smoke/)
-        frame_gap   : gap between frame pairs when building LBP-motion images
-        target_size : (width, height) for feature_extraction.make_lbp_motion_image
+        n_frames    : number of consecutive frames per LBP-motion sample.
+                      n_frames=2 → classic single-pair (paper default).
+                      n_frames>2 → average of n_frames-1 pairwise LBP images.
+        frame_gap   : stride between consecutive frames within each window.
+                      frame_gap=1 uses adjacent frames; larger values skip
+                      frames (useful for high-fps video).
+        target_size : (width, height) for feature_extraction
         transform   : torchvision transform applied to each sample
         precomputed : if True, treats every image file directly as a
                       pre-built LBP-motion image (skips feature extraction)
         """
+        if n_frames < 2:
+            raise ValueError(f"n_frames must be >= 2, got {n_frames}")
+
         self.root        = Path(root)
+        self.n_frames    = n_frames
         self.frame_gap   = frame_gap
         self.target_size = target_size
         self.transform   = transform
         self.precomputed = precomputed
 
-        self.samples: list[tuple] = []   # (path_or_pair, label)
+        self.samples: list[tuple] = []   # (path_group_or_single_path, label)
+
+        # Total frames spanned by one window: gap * (n-1) + 1
+        window_span = frame_gap * (n_frames - 1)
 
         for label, class_dir in enumerate(["no_smoke", "smoke"]):
             class_path = self.root / class_dir
@@ -132,30 +156,36 @@ class SmokeDataset(Dataset):
                     if not video_dir.is_dir():
                         continue
                     frame_paths = sorted(video_dir.glob("*.[jp][pn]g"))
-                    for i in range(len(frame_paths) - frame_gap):
-                        pair = (frame_paths[i], frame_paths[i + frame_gap])
-                        self.samples.append((pair, label))
+                    if len(frame_paths) < n_frames:
+                        continue   # skip videos too short for the window
+                    for i in range(len(frame_paths) - window_span):
+                        # Build an ordered group of n_frames paths
+                        group = tuple(
+                            frame_paths[i + j * frame_gap]
+                            for j in range(n_frames)
+                        )
+                        self.samples.append((group, label))
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx: int):
+        import cv2
         sample, label = self.samples[idx]
 
         if self.precomputed:
             # Load pre-built LBP-motion image directly
             img = Image.open(sample).convert("RGB")
         else:
-            # Build LBP-motion image on-the-fly from the frame pair
-            path1, path2 = sample
-            frame1 = np.array(Image.open(path1).convert("RGB"))
-            frame2 = np.array(Image.open(path2).convert("RGB"))
-            # make_lbp_motion_image expects BGR; convert RGB→BGR
-            import cv2
-            f1_bgr = cv2.cvtColor(frame1, cv2.COLOR_RGB2BGR)
-            f2_bgr = cv2.cvtColor(frame2, cv2.COLOR_RGB2BGR)
-            lbp_motion = make_lbp_motion_image(f1_bgr, f2_bgr, self.target_size)
-            img = Image.fromarray(lbp_motion)   # already RGB
+            # Load all frames in the window and convert to BGR for OpenCV
+            frames_bgr = []
+            for p in sample:
+                frame_rgb = np.array(Image.open(p).convert("RGB"))
+                frames_bgr.append(cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+
+            # Build LBP-motion image (averaged over pairs if n_frames > 2)
+            lbp_motion = make_lbp_motion_image_nframes(frames_bgr, self.target_size)
+            img = Image.fromarray(lbp_motion)   # RGB uint8
 
         if self.transform:
             img = self.transform(img)

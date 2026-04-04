@@ -176,6 +176,53 @@ def make_lbp_motion_image(
 
 
 # ---------------------------------------------------------------------------
+# N-frame LBP-motion image  (new: averages N-1 consecutive pair images)
+# ---------------------------------------------------------------------------
+def make_lbp_motion_image_nframes(
+    frames: list,
+    target_size: tuple = (240, 180),
+) -> np.ndarray:
+    """
+    Build a single LBP-motion image from a sequence of N consecutive frames
+    by averaging the N-1 pairwise LBP-motion images.
+
+    Parameters
+    ----------
+    frames : list of np.ndarray  shape (H, W, 3), dtype uint8, BGR
+        Ordered list of N frames (N >= 2).
+    target_size : (width, height)
+        Output spatial resolution passed to make_lbp_motion_image.
+
+    Returns
+    -------
+    lbp_motion_rgb : np.ndarray  shape (H, W, 3), dtype uint8
+        Averaged LBP-motion image in RGB colour space.
+
+    Notes
+    -----
+    With N=2 this is identical to make_lbp_motion_image(frames[0], frames[1]).
+    With N>2 each consecutive pair (f_i, f_{i+1}) produces one LBP-motion
+    image; the per-pixel mean across all N-1 images is returned.  This
+    captures motion accumulated over a longer temporal window while keeping
+    the output shape (H, W, 3) compatible with MobileNet.
+    """
+    if len(frames) < 2:
+        raise ValueError(f"Need at least 2 frames, got {len(frames)}")
+    if len(frames) == 2:
+        return make_lbp_motion_image(frames[0], frames[1], target_size)
+
+    accum = np.zeros(
+        (target_size[1], target_size[0], 3), dtype=np.float32
+    )
+    for i in range(len(frames) - 1):
+        pair_img = make_lbp_motion_image(frames[i], frames[i + 1], target_size)
+        accum += pair_img.astype(np.float32)
+
+    averaged = (accum / (len(frames) - 1)).clip(0, 255).astype(np.uint8)
+    return averaged
+
+
+# ---------------------------------------------------------------------------
 # Convenience: generate all LBP-motion images from a video file
 # ---------------------------------------------------------------------------
 def extract_lbp_motion_images_from_video(

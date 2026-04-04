@@ -121,7 +121,16 @@ def load_resnet(weights_path: str, device: torch.device) -> nn.Module:
 
 
 def load_yolo(weights_path: str) -> YOLO:
-    model = YOLO(weights_path)
+    # PyTorch 2.6+ changed the default of weights_only from False to True,
+    # which breaks ultralytics' internal torch.load calls.  Temporarily patch
+    # torch.load to restore the old default for the duration of YOLO.__init__.
+    import functools
+    original_load = torch.load
+    torch.load = functools.partial(original_load, weights_only=False)
+    try:
+        model = YOLO(weights_path)
+    finally:
+        torch.load = original_load
     print(f"  YOLOv8  loaded from {weights_path}")
     return model
 

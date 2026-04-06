@@ -155,7 +155,10 @@ class SmokeDataset(Dataset):
                 for video_dir in sorted(class_path.iterdir()):
                     if not video_dir.is_dir():
                         continue
-                    frame_paths = sorted(video_dir.glob("*.[jp][pn]g"))
+                    frame_paths = [
+                        p for p in sorted(video_dir.glob("*.[jp][pn]g"))
+                        if p.stat().st_size > 0   # skip empty/corrupt files
+                    ]
                     if len(frame_paths) < n_frames:
                         continue   # skip videos too short for the window
                     for i in range(len(frame_paths) - window_span):

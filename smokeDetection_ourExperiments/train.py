@@ -52,7 +52,10 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import time
+
 from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
 
 from model import SmokeDataset, build_model, get_transforms
 
@@ -118,6 +121,8 @@ def train(
     save_dir: str = "checkpoints",
     num_workers: int = 4,
     device: str | None = None,
+    cache_root: str | None = None,
+    preload_cache: bool = False,
 ):
     """
     Parameters
@@ -136,6 +141,13 @@ def train(
     save_dir    : directory for checkpoints and history JSON
     num_workers : DataLoader workers (auto-capped to 0 on Windows)
     device      : torch device string; auto-detected if None
+    cache_root    : path to pre-computed pairwise LBP cache (from
+                    precompute_lbp_cache.py).  Speeds up training dramatically
+                    by skipping on-the-fly optical flow + LBP computation.
+                    Changing n_frames when using the cache is nearly free.
+    preload_cache : load all cached pair PNGs into RAM at startup.  Eliminates
+                    disk I/O for every subsequent epoch.  Recommended on servers
+                    with >=8 GB free RAM.  Ignored if cache_root is not set.
     """
     device = torch.device(
         device if device else ("cuda" if torch.cuda.is_available() else "cpu")
@@ -143,6 +155,7 @@ def train(
     print(f"Using device  : {device}")
     print(f"n_frames      : {n_frames}  (frame_gap={frame_gap})")
     print(f"Variant       : {variant}   pretrained={pretrained}")
+    print(f"Cache root    : {cache_root if cache_root else 'None (on-the-fly)'}")
     Path(save_dir).mkdir(parents=True, exist_ok=True)
 
     workers = safe_num_workers(num_workers)
@@ -156,6 +169,8 @@ def train(
         n_frames=n_frames,
         frame_gap=frame_gap,
         transform=train_transform,
+        cache_root=cache_root,
+        preload_cache=preload_cache,
     )
 
     if val_root is not None:
@@ -165,6 +180,8 @@ def train(
             n_frames=n_frames,
             frame_gap=frame_gap,
             transform=val_transform,
+            cache_root=cache_root,
+            preload_cache=preload_cache,
         )
         print(f"Train root    : {train_root}")
         print(f"Val root      : {val_root}")
@@ -182,6 +199,8 @@ def train(
             n_frames=n_frames,
             frame_gap=frame_gap,
             transform=val_transform,
+            cache_root=cache_root,
+            preload_cache=preload_cache,
         )
         val_ds.dataset = val_ds_clean   # redirect val subset to no-aug dataset
         print(f"Train root    : {train_root}  (internal {val_split:.0%} val split)")
@@ -192,6 +211,7 @@ def train(
         shuffle=True,
         num_workers=workers,
         pin_memory=(device.type == "cuda"),
+        persistent_workers=(workers > 0),
     )
     val_loader = DataLoader(
         val_ds,
@@ -199,6 +219,7 @@ def train(
         shuffle=False,
         num_workers=workers,
         pin_memory=(device.type == "cuda"),
+        persistent_workers=(workers > 0),
     )
 
     print(f"Train samples : {len(train_ds)}")
@@ -211,6 +232,7 @@ def train(
 
     best_val_acc = 0.0
     history: list[dict] = []
+    t_start = time.time()
 
     # --- Epoch loop ---------------------------------------------------------
     for epoch in range(1, epochs + 1):
@@ -219,7 +241,9 @@ def train(
         model.train()
         train_logits, train_labels = [], []
 
-        for imgs, labels in train_loader:
+        train_bar = tqdm(train_loader, desc=f"Epoch {epoch:4d}/{epochs} [train]",
+                         leave=False, unit="batch")
+        for imgs, labels in train_bar:
             imgs, labels = imgs.to(device), labels.to(device)
             optimizer.zero_grad()
             logits = model(imgs).squeeze(1)       # (B,)
@@ -229,6 +253,7 @@ def train(
 
             train_logits.append(logits.detach().cpu())
             train_labels.append(labels.cpu())
+            train_bar.set_postfix(loss=f"{loss.item():.4f}")
 
         train_metrics = compute_metrics(
             torch.cat(train_labels), torch.cat(train_logits)
@@ -239,7 +264,8 @@ def train(
         val_logits, val_labels = [], []
 
         with torch.no_grad():
-            for imgs, labels in val_loader:
+            for imgs, labels in tqdm(val_loader, desc=f"Epoch {epoch:4d}/{epochs} [val]  ",
+                                     leave=False, unit="batch"):
                 imgs, labels = imgs.to(device), labels.to(device)
                 logits = model(imgs).squeeze(1)
                 val_logits.append(logits.cpu())
@@ -289,7 +315,12 @@ def train(
     with open(Path(save_dir) / "history.json", "w") as f:
         json.dump(history, f, indent=2)
 
+    elapsed = time.time() - t_start
+    h, rem  = divmod(int(elapsed), 3600)
+    m, s    = divmod(rem, 60)
+
     print(f"\nTraining complete.  Best val accuracy: {best_val_acc:.4f}")
+    print(f"Total training time: {h:02d}h {m:02d}m {s:02d}s")
     print(f"Checkpoint saved to: {save_dir}/best_model.pt")
     return history
 
@@ -375,6 +406,25 @@ if __name__ == "__main__":
     parser.add_argument("--frame_gap",  type=int,   default=1,
                         help="Stride between frames within each window (1 = adjacent)")
 
+    # Cache
+    parser.add_argument(
+        "--preload_cache", action="store_true",
+        help=(
+            "Load all cached pair PNGs into RAM at startup.  Eliminates disk "
+            "I/O after the first epoch.  Requires ~2.5 GB free RAM for the "
+            "full train split.  Only effective when --cache_root is set."
+        ),
+    )
+    parser.add_argument(
+        "--cache_root", default=None,
+        help=(
+            "Path to pre-computed pairwise LBP cache (built by "
+            "precompute_lbp_cache.py).  Highly recommended for repeated "
+            "training runs or n_frames experiments — skips on-the-fly "
+            "optical flow and LBP computation entirely."
+        ),
+    )
+
     # Runtime
     parser.add_argument("--save_dir",    default="checkpoints")
     parser.add_argument("--num_workers", type=int, default=4,
@@ -398,4 +448,6 @@ if __name__ == "__main__":
         save_dir=args.save_dir,
         num_workers=args.num_workers,
         device=args.device,
+        cache_root=args.cache_root,
+        preload_cache=args.preload_cache,
     )

@@ -97,6 +97,28 @@ class SmokeDataset(Dataset):
         window 2: (f2, f3, f4)
         window 3: (f3, f4, f5)
 
+    Cache mode (recommended for repeated training runs)
+    ---------------------------------------------------
+    Pass cache_root to point at a directory of pre-computed pairwise
+    LBP-motion images built by precompute_lbp_cache.py.  The cache stores
+    one PNG per *consecutive frame pair* (always gap=1), named pair_NNNN.png:
+
+        cache_root/
+          train/smoke/<fire_id>/pair_0000.png  pair_0001.png  ...
+          train/no_smoke/<fire_id>/pair_0000.png  ...
+          val/...
+
+    With the cache, different n_frames values are nearly free — loading
+    n_frames=3 just reads 2 cached PNGs and averages them in memory.
+    No OpenCV or scikit-image computation happens at training time.
+
+    Note: when using cache_root, frame_gap is baked into the cache itself
+    (determined by how precompute_lbp_cache.py was run) and the frame_gap
+    argument to SmokeDataset is ignored.  Organise multiple caches in
+    subdirectories (e.g. lbp_cache/gap_1/, lbp_cache/gap_2/) and point
+    cache_root at the one you want.  Varying n_frames within a given cache
+    is free — no recomputation needed.
+
     Alternatively, if you have pre-computed LBP-motion images already saved
     as PNG/JPG files in  root/{smoke,no_smoke}/*.png, set
     precomputed=True and the dataset will load them directly.
@@ -110,36 +132,51 @@ class SmokeDataset(Dataset):
         target_size: tuple[int, int] = (240, 180),
         transform: transforms.Compose | None = None,
         precomputed: bool = False,
+        cache_root: str | None = None,
+        preload_cache: bool = False,
     ):
         """
         Parameters
         ----------
-        root        : path to dataset root (must contain smoke/ and no_smoke/)
+        root        : path to dataset split root (must contain smoke/ and no_smoke/)
         n_frames    : number of consecutive frames per LBP-motion sample.
                       n_frames=2 → classic single-pair (paper default).
                       n_frames>2 → average of n_frames-1 pairwise LBP images.
-        frame_gap   : stride between consecutive frames within each window.
-                      frame_gap=1 uses adjacent frames; larger values skip
-                      frames (useful for high-fps video).
-        target_size : (width, height) for feature_extraction
+        frame_gap   : stride between frames within each window (on-the-fly mode
+                      only; ignored when cache_root is set).
+        target_size : (width, height) for on-the-fly feature extraction
         transform   : torchvision transform applied to each sample
         precomputed : if True, treats every image file directly as a
                       pre-built LBP-motion image (skips feature extraction)
+        cache_root    : path to pre-computed pairwise LBP cache produced by
+                        precompute_lbp_cache.py.  When set, on-the-fly
+                        computation is skipped entirely; n_frames controls how
+                        many consecutive cached pairs are averaged per sample.
+        preload_cache : if True (and cache_root is set), load every cached pair
+                        PNG into RAM at __init__ time.  __getitem__ then does
+                        only dict lookups and numpy ops — no disk I/O per epoch.
+                        Recommended on servers with ≥8 GB free RAM.
+                        (~2.5 GB for the full train split at 240×180.)
         """
         if n_frames < 2:
             raise ValueError(f"n_frames must be >= 2, got {n_frames}")
 
-        self.root        = Path(root)
-        self.n_frames    = n_frames
-        self.frame_gap   = frame_gap
-        self.target_size = target_size
-        self.transform   = transform
-        self.precomputed = precomputed
+        self.root          = Path(root)
+        self.n_frames      = n_frames
+        self.frame_gap     = frame_gap
+        self.target_size   = target_size
+        self.transform     = transform
+        self.precomputed   = precomputed
+        self.cache_root    = Path(cache_root) if cache_root else None
+        self.preload_cache = preload_cache and (cache_root is not None)
+        self._mem: dict    = {}   # path → np.ndarray, populated if preload_cache
 
         self.samples: list[tuple] = []   # (path_group_or_single_path, label)
 
         # Total frames spanned by one window: gap * (n-1) + 1
         window_span = frame_gap * (n_frames - 1)
+        # Number of cached pair images needed per sample window
+        n_pairs = n_frames - 1
 
         for label, class_dir in enumerate(["no_smoke", "smoke"]):
             class_path = self.root / class_dir
@@ -147,11 +184,32 @@ class SmokeDataset(Dataset):
                 raise FileNotFoundError(f"Expected directory: {class_path}")
 
             if precomputed:
-                # Each file is already an LBP-motion image
+                # Each file is already a complete LBP-motion image
                 for img_path in sorted(class_path.glob("*.[jp][pn]g")):
                     self.samples.append((img_path, label))
+
+            elif self.cache_root is not None:
+                # Load from pre-computed pairwise LBP cache.
+                # Each sample is a tuple of n_pairs consecutive pair PNGs.
+                # Infer the split name from root path to locate cache subdir.
+                split_name = self.root.name   # e.g. "train" or "val"
+                for video_dir in sorted(class_path.iterdir()):
+                    if not video_dir.is_dir():
+                        continue
+                    cache_video_dir = (
+                        self.cache_root / split_name / class_dir / video_dir.name
+                    )
+                    if not cache_video_dir.is_dir():
+                        continue
+                    pair_paths = sorted(cache_video_dir.glob("pair_*.png"))
+                    if len(pair_paths) < n_pairs:
+                        continue
+                    for i in range(len(pair_paths) - n_pairs + 1):
+                        group = tuple(pair_paths[i + j] for j in range(n_pairs))
+                        self.samples.append((group, label))
+
             else:
-                # Each sub-folder is a video; files inside are raw frames
+                # On-the-fly computation from raw frames
                 for video_dir in sorted(class_path.iterdir()):
                     if not video_dir.is_dir():
                         continue
@@ -162,31 +220,55 @@ class SmokeDataset(Dataset):
                     if len(frame_paths) < n_frames:
                         continue   # skip videos too short for the window
                     for i in range(len(frame_paths) - window_span):
-                        # Build an ordered group of n_frames paths
                         group = tuple(
                             frame_paths[i + j * frame_gap]
                             for j in range(n_frames)
                         )
                         self.samples.append((group, label))
 
+        # Preload all unique cached pair PNGs into RAM
+        if self.preload_cache and self.samples:
+            from tqdm import tqdm
+            all_paths = sorted({p for group, _ in self.samples for p in group})
+            print(f"Preloading {len(all_paths)} cached pair images into RAM...")
+            for p in tqdm(all_paths, unit="img", leave=False):
+                self._mem[p] = np.array(Image.open(p).convert("RGB"))
+            mem_mb = sum(a.nbytes for a in self._mem.values()) / 1024 ** 2
+            print(f"  Cache preloaded: {mem_mb:.0f} MB in RAM")
+
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx: int):
-        import cv2
         sample, label = self.samples[idx]
 
         if self.precomputed:
             # Load pre-built LBP-motion image directly
             img = Image.open(sample).convert("RGB")
+
+        elif self.cache_root is not None:
+            # Load n_pairs cached pair images and average them.
+            # sample is a tuple of Path objects pointing to pair_NNNN.png files.
+            # Use in-memory store if preload_cache=True, otherwise read from disk.
+            if self.preload_cache:
+                load = lambda p: self._mem[p]
+            else:
+                load = lambda p: np.array(Image.open(p).convert("RGB"))
+
+            if len(sample) == 1:
+                img = Image.fromarray(load(sample[0]))
+            else:
+                arrays = [load(p).astype(np.float32) for p in sample]
+                averaged = np.mean(arrays, axis=0).clip(0, 255).astype(np.uint8)
+                img = Image.fromarray(averaged)
+
         else:
-            # Load all frames in the window and convert to BGR for OpenCV
+            # On-the-fly: load raw frames and compute LBP-motion
+            import cv2
             frames_bgr = []
             for p in sample:
                 frame_rgb = np.array(Image.open(p).convert("RGB"))
                 frames_bgr.append(cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
-
-            # Build LBP-motion image (averaged over pairs if n_frames > 2)
             lbp_motion = make_lbp_motion_image_nframes(frames_bgr, self.target_size)
             img = Image.fromarray(lbp_motion)   # RGB uint8
 

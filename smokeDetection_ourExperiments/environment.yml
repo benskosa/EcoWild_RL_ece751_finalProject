@@ -1,0 +1,57 @@
+# ============================================================
+# environment.yml  —  smokeDetection_ourExperiments
+# LBP-motion + MobileNet smoke detector (ECE 751 final project)
+#
+# Create environment:
+#   conda env create -f environment.yml
+#   conda activate ece751
+#
+# Update existing environment after changes to this file:
+#   conda env update -f environment.yml --prune
+#
+# Target platform: Windows/Linux x86-64, Python 3.10, CUDA 11.8
+# For CPU-only machines: replace the pytorch-cuda line with cpuonly
+# ============================================================
+
+name: ece751
+
+channels:
+  - pytorch          # official PyTorch channel
+  - nvidia           # CUDA runtime
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+
+  # ---- Deep learning --------------------------------------------------------
+  - pytorch>=2.0                   # neural network training
+  - torchvision>=0.15              # MobileNet models + transforms
+  - pytorch-cuda=11.8              # GPU support — change to match your CUDA version
+                                   # (check with: nvidia-smi)
+                                   # For CPU-only, replace this line with: cpuonly
+
+  # ---- Computer vision & image processing -----------------------------------
+  - opencv>=4.7                    # optical flow (Farneback), BGR/HSV conversions
+  - scikit-image>=0.21             # local_binary_pattern (LBP feature extraction)
+  - pillow>=9.0                    # image loading in PyTorch dataset
+
+  # ---- Numerics & data ------------------------------------------------------
+  - numpy>=1.23,<2.0               # array ops; <2.0 for PyTorch 2.x compatibility
+  - scikit-learn>=1.3              # roc_curve / auc in eval.py
+
+  # ---- Visualisation --------------------------------------------------------
+  - matplotlib>=3.7                # ROC curves, LBP visualizations
+
+  # ---- Utilities ------------------------------------------------------------
+  - tqdm>=4.65                     # optional progress bars
+
+  # ---- Environment fix ------------------------------------------------------
+  # Prevents OpenMP crash when PyTorch and OpenCV both load libiomp5md.dll
+  # (Windows only — harmless on Linux)
+  - pip
+  - pip:
+    - pip  # placeholder so the pip block is valid on all platforms
+
+variables:
+  KMP_DUPLICATE_LIB_OK: "TRUE"    # fixes PyTorch + OpenCV OpenMP conflict on Windows

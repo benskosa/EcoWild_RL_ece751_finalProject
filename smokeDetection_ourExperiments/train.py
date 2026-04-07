@@ -123,6 +123,7 @@ def train(
     device: str | None = None,
     cache_root: str | None = None,
     preload_cache: bool = False,
+    run_name: str = "best_model",
 ):
     """
     Parameters
@@ -308,7 +309,7 @@ def train(
                     "n_frames":   n_frames,
                     "frame_gap":  frame_gap,
                 },
-                Path(save_dir) / "best_model.pt",
+                Path(save_dir) / f"{run_name}.pt",
             )
 
     # ---- Save training history as JSON -------------------------------------
@@ -321,7 +322,7 @@ def train(
 
     print(f"\nTraining complete.  Best val accuracy: {best_val_acc:.4f}")
     print(f"Total training time: {h:02d}h {m:02d}m {s:02d}s")
-    print(f"Checkpoint saved to: {save_dir}/best_model.pt")
+    print(f"Checkpoint saved to: {save_dir}/{run_name}.pt")
     return history
 
 
@@ -426,7 +427,9 @@ if __name__ == "__main__":
     )
 
     # Runtime
-    parser.add_argument("--save_dir",    default="checkpoints")
+    parser.add_argument("--save_dir",  default="checkpoints")
+    parser.add_argument("--run_name",  default="best_model",
+                        help="Filename stem for the saved checkpoint (default: best_model → best_model.pt)")
     parser.add_argument("--num_workers", type=int, default=4,
                         help="DataLoader workers (auto-set to 0 on Windows)")
     parser.add_argument("--device",      default=None,
@@ -450,4 +453,5 @@ if __name__ == "__main__":
         device=args.device,
         cache_root=args.cache_root,
         preload_cache=args.preload_cache,
+        run_name=args.run_name,
     )

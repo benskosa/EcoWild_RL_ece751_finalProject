@@ -232,6 +232,7 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     best_val_acc = 0.0
+    best_val_tpr = 0.0
     history: list[dict] = []
     t_start = time.time()
 
@@ -297,20 +298,24 @@ def train(
                 f"FPR={val_metrics['fpr']:.4f}"
             )
 
-        # ---- Save best checkpoint ------------------------------------------
+        # ---- Save best checkpoints -----------------------------------------
+        ckpt = {
+            "epoch":      epoch,
+            "state_dict": model.state_dict(),
+            "val_acc":    val_metrics["accuracy"],
+            "val_tpr":    val_metrics["tpr"],
+            "variant":    variant,
+            "n_frames":   n_frames,
+            "frame_gap":  frame_gap,
+        }
+
         if val_metrics["accuracy"] > best_val_acc:
             best_val_acc = val_metrics["accuracy"]
-            torch.save(
-                {
-                    "epoch":      epoch,
-                    "state_dict": model.state_dict(),
-                    "val_acc":    best_val_acc,
-                    "variant":    variant,
-                    "n_frames":   n_frames,
-                    "frame_gap":  frame_gap,
-                },
-                Path(save_dir) / f"{run_name}.pt",
-            )
+            torch.save(ckpt, Path(save_dir) / f"{run_name}_best_acc.pt")
+
+        if val_metrics["tpr"] > best_val_tpr:
+            best_val_tpr = val_metrics["tpr"]
+            torch.save(ckpt, Path(save_dir) / f"{run_name}_best_tpr.pt")
 
     # ---- Save training history as JSON -------------------------------------
     with open(Path(save_dir) / "history.json", "w") as f:
@@ -320,9 +325,10 @@ def train(
     h, rem  = divmod(int(elapsed), 3600)
     m, s    = divmod(rem, 60)
 
-    print(f"\nTraining complete.  Best val accuracy: {best_val_acc:.4f}")
-    print(f"Total training time: {h:02d}h {m:02d}m {s:02d}s")
-    print(f"Checkpoint saved to: {save_dir}/{run_name}.pt")
+    print(f"\nTraining complete.")
+    print(f"  Best val accuracy : {best_val_acc:.4f}  -> {save_dir}/{run_name}_best_acc.pt")
+    print(f"  Best val TPR      : {best_val_tpr:.4f}  -> {save_dir}/{run_name}_best_tpr.pt")
+    print(f"  Total training time: {h:02d}h {m:02d}m {s:02d}s")
     return history
 
 

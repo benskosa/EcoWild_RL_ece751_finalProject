@@ -62,6 +62,7 @@ import numpy as np
 import torch
 from sklearn.metrics import auc, roc_curve
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from model import SmokeDataset, build_model, get_transforms
 
@@ -87,7 +88,7 @@ def collect_predictions(
     all_probs, all_labels = [], []
 
     with torch.no_grad():
-        for imgs, lbls in loader:
+        for imgs, lbls in tqdm(loader, desc="Evaluating", unit="batch"):
             imgs = imgs.to(device)
             logits = model(imgs).squeeze(1)
             p = torch.sigmoid(logits).cpu().numpy()
@@ -290,6 +291,7 @@ def evaluate(args) -> None:
     print(f"Loaded checkpoint: {args.checkpoint}  (variant={variant})")
 
     # --- Build test dataset -------------------------------------------------
+    print("Building dataset...")
     if args.figlib:
         # Import FIgLib-specific loader (timestamp-aware pairing)
         from figlib_dataset import FIgLibDataset
@@ -316,7 +318,9 @@ def evaluate(args) -> None:
     print(f"Test samples: {len(dataset)}")
 
     # --- Collect predictions ------------------------------------------------
+    print("Running inference...")
     probs, labels = collect_predictions(model, loader, device)
+    print(f"Inference complete. Computing metrics...")
 
     # --- Metrics at chosen threshold ----------------------------------------
     m = threshold_metrics(probs, labels, args.threshold)

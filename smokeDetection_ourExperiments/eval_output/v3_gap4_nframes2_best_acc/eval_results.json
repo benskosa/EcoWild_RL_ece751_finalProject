@@ -1,0 +1,17 @@
+{
+  "setup": "1_standalone",
+  "checkpoint": "checkpoints/v3_gap4_nframes2.pt",
+  "gate_metrics": {
+    "threshold": 0.4,
+    "accuracy": 0.6943972835314092,
+    "tpr": 0.6007326007326007,
+    "fpr": 0.2001031459515214,
+    "ppv": 0.7717647058823529,
+    "f1": 0.6755921730175077,
+    "tp": 1312,
+    "tn": 1551,
+    "fp": 388,
+    "fn": 872
+  },
+  "auc": 0.74651079537619
+}

@@ -1,152 +1,297 @@
+"""
+simple_resnet.py
+----------------
+Fine-tunes a pretrained ResNet34 binary smoke classifier on the EcoWild
+dataset.
+
+Usage
+-----
+    python simple_resnet.py \\
+        --train_root ../Dataset/train \\
+        --val_root   ../Dataset/val \\
+        --save_dir   checkpoints \\
+        --run_name   resnet34_baseline
+
+    # Fewer epochs, larger batch:
+    python simple_resnet.py \\
+        --train_root ../Dataset/train \\
+        --val_root   ../Dataset/val \\
+        --epochs 100 --batch_size 64
+
+Directory structure expected under --train_root / --val_root:
+    <root>/
+      smoke/       <fire_id>/  *.jpg  ...
+      no_smoke/    <fire_id>/  *.jpg  ...
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import platform
+import time
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision.models as models
 import torchvision.transforms as transforms
+from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
-import torchvision.models as models 
-import matplotlib.pyplot as plt
 from tqdm import tqdm
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
-# 데이터 전처리 설정 (증강 없이)
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),  # ResNet에 최적화된 입력 크기
-    transforms.ToTensor(),
-])
 
-# 데이터셋 경로 설정
-train_image_dir = '/home/GJ/Workspace/WILDFIRE/DATA/tiled_224_golden/yolo_train/train/'
-val_image_dir = '/home/GJ/Workspace/WILDFIRE/DATA/tiled_224_golden/yolo_train/val/'
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-# ImageFolder를 사용하여 데이터셋 로드 (클래스 폴더 구조를 자동으로 인식)
-train_dataset = ImageFolder(root=train_image_dir, transform=transform)
-val_dataset = ImageFolder(root=val_image_dir, transform=transform)
+def safe_num_workers(requested: int) -> int:
+    return 0 if platform.system() == "Windows" else requested
 
-# 데이터 로더 생성
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
-# ResNet34 모델 로드 및 최종 레이어 수정 (이진 분류)
-resnet34 = models.resnet34(pretrained=True)
-num_features = resnet34.fc.in_features
-resnet34.fc = nn.Linear(num_features, 2)  # 이진 분류를 위해 출력 노드를 2개로 설정
+def fmt_time(seconds: float) -> str:
+    h, rem = divmod(int(seconds), 3600)
+    m, s   = divmod(rem, 60)
+    return f"{h:02d}h {m:02d}m {s:02d}s"
 
-# 장치 설정
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-resnet34.to(device)
 
-# 손실 함수 및 옵티마이저 설정
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(resnet34.parameters(), lr=0.0001)
+def compute_metrics(conf_matrix) -> dict[str, float]:
+    """Derive accuracy, TPR, FPR, PPV from a 2x2 confusion matrix."""
+    # ImageFolder sorts classes alphabetically: no_smoke=0, smoke=1
+    tn, fp = int(conf_matrix[0, 0]), int(conf_matrix[0, 1])
+    fn, tp = int(conf_matrix[1, 0]), int(conf_matrix[1, 1])
 
-# 훈련 및 검증 함수 정의
-def train(model, criterion, optimizer, data_loader, device):
+    total    = tp + tn + fp + fn
+    accuracy = (tp + tn) / total       if total       > 0 else 0.0
+    tpr      = tp / (tp + fn)          if (tp + fn)   > 0 else 0.0
+    fpr      = fp / (fp + tn)          if (fp + tn)   > 0 else 0.0
+    ppv      = tp / (tp + fp)          if (tp + fp)   > 0 else 0.0
+    f1       = 2*ppv*tpr / (ppv + tpr) if (ppv + tpr) > 0 else 0.0
+
+    return {"accuracy": accuracy, "tpr": tpr, "fpr": fpr, "ppv": ppv, "f1": f1,
+            "tp": tp, "tn": tn, "fp": fp, "fn": fn}
+
+
+# ---------------------------------------------------------------------------
+# Training / validation steps
+# ---------------------------------------------------------------------------
+
+def train_epoch(model, loader, criterion, optimizer, device, epoch, epochs):
     model.train()
     running_loss = 0.0
-    for inputs, labels in tqdm(data_loader):
+    all_labels, all_preds = [], []
+
+    bar = tqdm(loader, desc=f"Epoch {epoch:4d}/{epochs} [train]",
+               leave=False, unit="batch")
+    for inputs, labels in bar:
         inputs, labels = inputs.to(device), labels.to(device)
-        
         optimizer.zero_grad()
-        
         outputs = model(inputs)
-        loss = criterion(outputs, labels)
+        loss    = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
-        
-        running_loss += loss.item() * inputs.size(0)
-    
-    epoch_loss = running_loss / len(data_loader.dataset)
-    return epoch_loss
 
-def validate(model, criterion, data_loader, device):
+        running_loss += loss.item() * inputs.size(0)
+        _, preds = torch.max(outputs, 1)
+        all_labels.extend(labels.cpu().tolist())
+        all_preds.extend(preds.cpu().tolist())
+        bar.set_postfix(loss=f"{loss.item():.4f}")
+
+    epoch_loss = running_loss / len(loader.dataset)
+    cm = confusion_matrix(all_labels, all_preds, labels=[0, 1])
+    return epoch_loss, compute_metrics(cm)
+
+
+def val_epoch(model, loader, criterion, device, epoch, epochs):
     model.eval()
     running_loss = 0.0
-    correct_predictions = 0
-    all_labels = []
-    all_preds = []
-    
+    all_labels, all_preds = [], []
+
     with torch.no_grad():
-        for inputs, labels in tqdm(data_loader):
+        for inputs, labels in tqdm(loader,
+                                   desc=f"Epoch {epoch:4d}/{epochs} [val]  ",
+                                   leave=False, unit="batch"):
             inputs, labels = inputs.to(device), labels.to(device)
-            
             outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            
+            loss    = criterion(outputs, labels)
+
             running_loss += loss.item() * inputs.size(0)
             _, preds = torch.max(outputs, 1)
-            correct_predictions += torch.sum(preds == labels.data)
-            
-            all_labels.extend(labels.cpu().numpy())
-            all_preds.extend(preds.cpu().numpy())
-    
-    epoch_loss = running_loss / len(data_loader.dataset)
-    accuracy = correct_predictions.double() / len(data_loader.dataset)
-    conf_matrix = confusion_matrix(all_labels, all_preds)
-    return epoch_loss, accuracy, conf_matrix
+            all_labels.extend(labels.cpu().tolist())
+            all_preds.extend(preds.cpu().tolist())
 
-# Early Stopping 설정
-patience = 50
-early_stopping_counter = 0
+    epoch_loss = running_loss / len(loader.dataset)
+    cm = confusion_matrix(all_labels, all_preds, labels=[0, 1])
+    return epoch_loss, compute_metrics(cm)
 
-# 손실 및 정확도 추적
-train_losses = []
-val_losses = []
-val_accuracies = []
 
-# 모델 훈련 및 검증 루프
-num_epochs = 1000
-best_accuracy = 0.0
-best_epoch = 0
+# ---------------------------------------------------------------------------
+# Main training loop
+# ---------------------------------------------------------------------------
 
-for epoch in range(num_epochs):
-    print(f'Epoch {epoch}/{num_epochs - 1}')
-    train_loss = train(resnet34, criterion, optimizer, train_loader, device)
-    val_loss, val_accuracy, conf_matrix = validate(resnet34, criterion, val_loader, device)
-    
-    train_losses.append(train_loss)
-    val_losses.append(val_loss)
-    val_accuracies.append(val_accuracy)
-    
-    print(f'Epoch {epoch}/{num_epochs - 1}, '
-          f'Train Loss: {train_loss:.4f}, '
-          f'Validation Loss: {val_loss:.4f}, '
-          f'Validation Accuracy: {val_accuracy:.4f}')
-    
-    # 혼동 행렬 출력
-    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=[0, 1])
-    disp.plot()
-    plt.show()
-    
-    # 가장 좋은 성능을 보인 모델 저장
-    if val_accuracy > best_accuracy:
-        best_accuracy = val_accuracy
-        best_epoch = epoch
-        torch.save(resnet34.state_dict(), f'best_resnet34_224_model_epoch_{epoch}.pth')
-        early_stopping_counter = 0  # Early stopping counter 초기화
-    else:
-        early_stopping_counter += 1
-    
-    # Early stopping 조건 확인
-    if early_stopping_counter >= patience:
-        print("Early stopping triggered.")
-        break
+def train(args) -> None:
+    device  = torch.device(
+        args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu")
+    )
+    workers = safe_num_workers(args.num_workers)
+    save_dir = Path(args.save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 손실 및 정확도 그래프 저장
-    plt.figure(figsize=(10, 5))
-    plt.plot(train_losses, label='Training Loss', color='blue')
-    plt.plot(val_losses, label='Validation Loss', color='orange')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend(loc='upper left')
+    print(f"Using device  : {device}")
+    print(f"Train root    : {args.train_root}")
+    print(f"Val root      : {args.val_root}")
 
-    # 정확도를 같은 그래프에 추가, 오른쪽 y축 사용
-    ax2 = plt.gca().twinx()
-    ax2.plot([acc.cpu().numpy() for acc in val_accuracies], label='Validation Accuracy', color='green')
-    ax2.set_ylabel('Accuracy')
-    ax2.legend(loc='upper right')
+    # --- Transforms ---------------------------------------------------------
+    train_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std =[0.229, 0.224, 0.225]),
+    ])
+    val_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std =[0.229, 0.224, 0.225]),
+    ])
 
-    plt.title('Training & Validation Loss and Accuracy vs. Epoch')
-    plt.savefig('loss_accuracy_vs_epoch_224.png')
+    # --- Datasets -----------------------------------------------------------
+    # ImageFolder reads class labels from subfolder names.
+    # Alphabetical order → no_smoke=0, smoke=1  (matches SmokeDataset)
+    train_ds = ImageFolder(root=args.train_root, transform=train_transform)
+    val_ds   = ImageFolder(root=args.val_root,   transform=val_transform)
 
-print(f'Best model saved from epoch {best_epoch} with validation accuracy of {best_accuracy:.4f}.')
+    print(f"Train samples : {len(train_ds)}  "
+          f"(classes: {train_ds.class_to_idx})")
+    print(f"Val samples   : {len(val_ds)}")
+
+    train_loader = DataLoader(
+        train_ds, batch_size=args.batch_size, shuffle=True,
+        num_workers=workers, pin_memory=(device.type == "cuda"),
+        persistent_workers=(workers > 0),
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=args.batch_size, shuffle=False,
+        num_workers=workers, pin_memory=(device.type == "cuda"),
+        persistent_workers=(workers > 0),
+    )
+
+    # --- Model --------------------------------------------------------------
+    model = models.resnet34(weights=models.ResNet34_Weights.DEFAULT)
+    model.fc = nn.Linear(model.fc.in_features, 2)   # binary: no_smoke / smoke
+    model.to(device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    # --- Training loop ------------------------------------------------------
+    best_val_acc = 0.0
+    best_val_tpr = 0.0
+    early_stop_counter = 0
+    history = []
+    t_start = time.time()
+
+    for epoch in range(1, args.epochs + 1):
+        train_loss, train_m = train_epoch(
+            model, train_loader, criterion, optimizer, device, epoch, args.epochs
+        )
+        val_loss, val_m = val_epoch(
+            model, val_loader, criterion, device, epoch, args.epochs
+        )
+
+        row = {
+            "epoch":      epoch,
+            "train_loss": round(train_loss, 6),
+            "val_loss":   round(val_loss,   6),
+            "train_acc":  round(train_m["accuracy"], 6),
+            "val_acc":    round(val_m["accuracy"],   6),
+            "val_tpr":    round(val_m["tpr"],        6),
+            "val_fpr":    round(val_m["fpr"],        6),
+            "val_ppv":    round(val_m["ppv"],        6),
+            "val_f1":     round(val_m["f1"],         6),
+        }
+        history.append(row)
+
+        if epoch % 10 == 0 or epoch == 1:
+            print(
+                f"Epoch {epoch:4d}/{args.epochs} | "
+                f"train_acc={train_m['accuracy']:.4f} | "
+                f"val_acc={val_m['accuracy']:.4f} | "
+                f"TPR={val_m['tpr']:.4f} | "
+                f"FPR={val_m['fpr']:.4f} | "
+                f"PPV={val_m['ppv']:.4f}"
+            )
+
+        # Save best-accuracy checkpoint
+        if val_m["accuracy"] > best_val_acc:
+            best_val_acc = val_m["accuracy"]
+            early_stop_counter = 0
+            torch.save(
+                {"epoch": epoch, "state_dict": model.state_dict(),
+                 "val_acc": best_val_acc, "val_tpr": val_m["tpr"],
+                 "model": "resnet34"},
+                save_dir / f"{args.run_name}_best_acc.pt",
+            )
+        else:
+            early_stop_counter += 1
+
+        # Save best-TPR checkpoint
+        if val_m["tpr"] > best_val_tpr:
+            best_val_tpr = val_m["tpr"]
+            torch.save(
+                {"epoch": epoch, "state_dict": model.state_dict(),
+                 "val_acc": val_m["accuracy"], "val_tpr": best_val_tpr,
+                 "model": "resnet34"},
+                save_dir / f"{args.run_name}_best_tpr.pt",
+            )
+
+        # Early stopping
+        if early_stop_counter >= args.patience:
+            print(f"\nEarly stopping triggered at epoch {epoch} "
+                  f"(no val_acc improvement for {args.patience} epochs).")
+            break
+
+    # --- Save history -------------------------------------------------------
+    with open(save_dir / "history.json", "w") as f:
+        json.dump(history, f, indent=2)
+
+    elapsed = fmt_time(time.time() - t_start)
+    print(f"\nTraining complete.")
+    print(f"  Best val accuracy : {best_val_acc:.4f}  "
+          f"-> {save_dir}/{args.run_name}_best_acc.pt")
+    print(f"  Best val TPR      : {best_val_tpr:.4f}  "
+          f"-> {save_dir}/{args.run_name}_best_tpr.pt")
+    print(f"  Total time        : {elapsed}")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--train_root", required=True,
+                        help="Training split root (smoke/ and no_smoke/ inside)")
+    parser.add_argument("--val_root",   required=True,
+                        help="Validation split root")
+    parser.add_argument("--save_dir",   default="checkpoints",
+                        help="Directory for checkpoints and history.json")
+    parser.add_argument("--run_name",   default="resnet34_baseline",
+                        help="Checkpoint filename stem")
+    parser.add_argument("--epochs",     type=int,   default=1000)
+    parser.add_argument("--batch_size", type=int,   default=64)
+    parser.add_argument("--lr",         type=float, default=0.0001)
+    parser.add_argument("--patience",   type=int,   default=50,
+                        help="Early stopping patience (epochs without val_acc improvement)")
+    parser.add_argument("--num_workers", type=int,  default=4)
+    parser.add_argument("--device",     default=None,
+                        help="e.g. 'cuda', 'cpu'. Auto-detected if omitted.")
+    args = parser.parse_args()
+    train(args)

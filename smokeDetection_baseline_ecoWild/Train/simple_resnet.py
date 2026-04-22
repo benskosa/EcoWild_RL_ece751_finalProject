@@ -225,6 +225,9 @@ def train(args) -> None:
                 f"FPR={val_m['fpr']:.4f} | "
                 f"PPV={val_m['ppv']:.4f}"
             )
+            # Checkpoint history every 10 epochs so it survives early kills
+            with open(save_dir / "history.json", "w") as f:
+                json.dump(history, f, indent=2)
 
         # Save best-accuracy checkpoint
         if val_m["accuracy"] > best_val_acc:

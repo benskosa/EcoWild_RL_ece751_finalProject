@@ -297,6 +297,9 @@ def train(
                 f"PPV={val_metrics['ppv']:.4f} | "
                 f"FPR={val_metrics['fpr']:.4f}"
             )
+            # Checkpoint history every 10 epochs so it survives early kills
+            with open(Path(save_dir) / "history.json", "w") as f:
+                json.dump(history, f, indent=2)
 
         # ---- Save best checkpoints -----------------------------------------
         ckpt = {

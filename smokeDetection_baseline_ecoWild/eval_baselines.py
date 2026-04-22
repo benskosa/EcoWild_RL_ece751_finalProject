@@ -186,23 +186,23 @@ def run_yolo(ckpt_path: Path, data_root: Path, batch_size: int,
     dataset = SafeImageFolder(root=str(data_root))
     image_paths = [s[0] for s in dataset.samples]
 
-    model  = YOLO(str(ckpt_path))
-    # Predict in one call; YOLO handles batching internally
-    results = model.predict(
-        source  = image_paths,
-        imgsz   = imgsz,
-        batch   = batch_size,
-        workers = num_workers,
-        verbose = False,
-        stream  = True,    # memory-efficient generator
-    )
+    model = YOLO(str(ckpt_path))
 
+    # Process in small batches to avoid OOM — passing all paths at once can
+    # spike RAM enough for the OS to kill the process before streaming starts
     all_probs = []
-    for r in tqdm(results, total=len(image_paths),
-                  desc="YOLOv8 inference", unit="img"):
-        # Class order matches training: no_smoke=0, smoke=1 (alphabetical)
-        smoke_prob = float(r.probs.data[1].item())
-        all_probs.append(smoke_prob)
+    for i in tqdm(range(0, len(image_paths), batch_size),
+                  desc="YOLOv8 inference", unit="batch"):
+        batch_paths = image_paths[i : i + batch_size]
+        results = model.predict(
+            source  = batch_paths,
+            imgsz   = imgsz,
+            verbose = False,
+        )
+        for r in results:
+            # Class order matches training: no_smoke=0, smoke=1 (alphabetical)
+            smoke_prob = float(r.probs.data[1].item())
+            all_probs.append(smoke_prob)
 
     return np.array(all_probs)
 

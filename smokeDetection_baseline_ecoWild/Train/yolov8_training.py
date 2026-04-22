@@ -4,19 +4,22 @@ yolov8_training.py
 Fine-tunes YOLOv8-nano (or any YOLO variant) in classification mode for
 binary smoke detection on the EcoWild dataset.
 
-YOLOv8 classification expects the dataset root to contain class-named
-subdirectories under each split:
+Our dataset has an extra fire_id subdirectory level that confuses YOLOv8:
 
     <data_root>/
       train/
         smoke/     <fire_id>/  *.jpg  ...
         no_smoke/  <fire_id>/  *.jpg  ...
-      val/
-        smoke/     <fire_id>/  *.jpg  ...
-        no_smoke/  <fire_id>/  *.jpg  ...
 
-YOLOv8 finds images recursively, so the extra fire_id subdirectory level
-is handled automatically.
+This script automatically builds a temporary flat symlink tree that
+YOLOv8 can read correctly (no files are copied or moved):
+
+    <tmp>/
+      train/
+        smoke/     *.jpg  (symlinks to originals)
+        no_smoke/  *.jpg
+
+The temp directory is deleted when training finishes.
 
 Usage
 -----
@@ -37,14 +40,50 @@ Usage
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
+import tempfile
 import time
 from pathlib import Path
+
+
+SPLITS  = ["train", "val", "test"]
+CLASSES = ["smoke", "no_smoke"]
 
 
 def fmt_time(seconds: float) -> str:
     h, rem = divmod(int(seconds), 3600)
     m, s   = divmod(rem, 60)
     return f"{h:02d}h {m:02d}m {s:02d}s"
+
+
+def build_flat_symlink_tree(data_root: Path) -> Path:
+    """
+    Create a temporary directory with a flat class/image structure for YOLOv8.
+
+    Our layout:   split/class/<fire_id>/*.jpg
+    YOLOv8 wants: split/class/*.jpg
+
+    Symlinks are created so no data is duplicated.
+    Returns the path to the temp root (caller must delete it when done).
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="yolo_flat_"))
+    n_links = 0
+    for split in SPLITS:
+        for cls in CLASSES:
+            src_class = data_root / split / cls
+            if not src_class.is_dir():
+                continue
+            dst_class = tmp / split / cls
+            dst_class.mkdir(parents=True, exist_ok=True)
+            for img in sorted(src_class.rglob("*.jpg")):
+                # Use the full relative path as the filename to guarantee uniqueness
+                unique_name = img.relative_to(src_class).as_posix().replace("/", "__")
+                dst = dst_class / unique_name
+                os.symlink(img, dst)
+                n_links += 1
+    print(f"Flat symlink tree built: {tmp}  ({n_links} symlinks)")
+    return tmp
 
 
 def train(args) -> None:
@@ -66,27 +105,35 @@ def train(args) -> None:
     print(f"Patience      : {args.patience}")
     print(f"Workers       : {args.workers}")
 
-    model = YOLO(args.model)
+    # Build a temporary flat view of the dataset that YOLOv8 can parse correctly
+    print("\nBuilding flat symlink tree for YOLOv8...")
+    flat_root = build_flat_symlink_tree(data_root)
 
+    model   = YOLO(args.model)
     t_start = time.time()
     print("\nSTART TRAINING")
 
-    model.train(
-        data     = str(data_root),
-        epochs   = args.epochs,
-        batch    = args.batch,
-        imgsz    = args.imgsz,
-        device   = args.device,
-        resume   = args.resume,
-        save     = True,
-        patience = args.patience,
-        workers  = args.workers,
-        project  = args.project,
-        name     = args.name,
-        optimizer= args.optimizer,
-        plots    = True,
-        exist_ok = True,
-    )
+    try:
+        model.train(
+            data     = str(flat_root),
+            epochs   = args.epochs,
+            batch    = args.batch,
+            imgsz    = args.imgsz,
+            device   = args.device,
+            resume   = args.resume,
+            save     = True,
+            patience = args.patience,
+            workers  = args.workers,
+            project  = args.project,
+            name     = args.name,
+            optimizer= args.optimizer,
+            plots    = True,
+            exist_ok = True,
+        )
+    finally:
+        # Always clean up the temp tree, even if training crashes
+        shutil.rmtree(flat_root, ignore_errors=True)
+        print(f"Temp symlink tree removed: {flat_root}")
 
     elapsed = fmt_time(time.time() - t_start)
     print(f"\nTraining complete.")

@@ -50,10 +50,45 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torchvision.transforms as transforms
+from PIL import Image
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from tqdm import tqdm
+
+
+# ---------------------------------------------------------------------------
+# Corrupted-file-safe ImageFolder
+# ---------------------------------------------------------------------------
+
+class SafeImageFolder(ImageFolder):
+    """ImageFolder that silently skips 0-byte or unreadable image files."""
+
+    def __init__(self, root, **kwargs):
+        super().__init__(root, **kwargs)
+        good_samples = []
+        n_skipped = 0
+        for path, label in self.samples:
+            if not self._is_valid(path):
+                print(f"  [skip] corrupted file: {path}")
+                n_skipped += 1
+                continue
+            good_samples.append((path, label))
+        if n_skipped:
+            print(f"  Skipped {n_skipped} corrupted file(s).")
+        self.samples = good_samples
+        self.targets = [s[1] for s in good_samples]
+
+    @staticmethod
+    def _is_valid(path: str) -> bool:
+        try:
+            if not path or __import__("os").path.getsize(path) == 0:
+                return False
+            with Image.open(path) as img:
+                img.verify()
+            return True
+        except Exception:
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +152,7 @@ def run_resnet(ckpt_path: Path, data_root: Path, batch_size: int,
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std =[0.229, 0.224, 0.225]),
     ])
-    dataset = ImageFolder(root=str(data_root), transform=transform)
+    dataset = SafeImageFolder(root=str(data_root), transform=transform)
     loader  = DataLoader(dataset, batch_size=batch_size, shuffle=False,
                          num_workers=num_workers, pin_memory=(device.type == "cuda"))
 
@@ -148,7 +183,7 @@ def run_yolo(ckpt_path: Path, data_root: Path, batch_size: int,
     from ultralytics import YOLO
 
     # Collect image paths in the same order ImageFolder would
-    dataset = ImageFolder(root=str(data_root))
+    dataset = SafeImageFolder(root=str(data_root))
     image_paths = [s[0] for s in dataset.samples]
 
     model  = YOLO(str(ckpt_path))
@@ -213,7 +248,7 @@ def main() -> None:
     print(f"Thresholds : {args.threshold}")
 
     # --- Get ground-truth labels from ImageFolder (alphabetical: no_smoke=0, smoke=1)
-    dataset = ImageFolder(root=str(data_root))
+    dataset = SafeImageFolder(root=str(data_root))
     labels  = np.array([s[1] for s in dataset.samples])
     n_smoke    = int(labels.sum())
     n_no_smoke = int((labels == 0).sum())

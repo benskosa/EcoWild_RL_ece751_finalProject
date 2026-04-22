@@ -1,0 +1,17 @@
+{
+  "setup": "1_standalone",
+  "checkpoint": "/home/bkosa/EcoWild_RL_ece751_finalProject/smokeDetection_ourExperiments/sweep_results/checkpoints/nf2_gap16/nf2_gap16_best_acc.pt",
+  "gate_metrics": {
+    "threshold": 0.4,
+    "accuracy": 0.5499231950844854,
+    "tpr": 0.7392156862745098,
+    "fpr": 0.6570203644158628,
+    "ppv": 0.5515727871250914,
+    "f1": 0.6317553414327607,
+    "tp": 754,
+    "tn": 320,
+    "fp": 613,
+    "fn": 266
+  },
+  "auc": 0.5818117815186097
+}

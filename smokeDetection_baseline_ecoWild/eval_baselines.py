@@ -9,7 +9,8 @@ threshold.  Default threshold is 0.75, matching the paper:
   (target: TPR=0.50, FPR=0.19 at threshold=0.75, imgsz=224)
 
 Also reports AUC and, when both models are supplied, an ensemble score
-(average of ResNet34 + YOLOv8 smoke probabilities).
+using OR logic (smoke flagged if either model exceeds the threshold),
+implemented as max(resnet_prob, yolo_prob).
 
 ImageFolder alphabetical class order: no_smoke=0, smoke=1
 
@@ -275,7 +276,10 @@ def main() -> None:
 
     # --- Ensemble (if both available) ---
     if "resnet34" in probs_dict and "yolov8" in probs_dict:
-        probs_dict["ensemble"] = (probs_dict["resnet34"] + probs_dict["yolov8"]) / 2.0
+        # OR logic: flag smoke if either model exceeds the threshold.
+        # Equivalent to taking the max probability — if max >= threshold,
+        # at least one model crossed it.
+        probs_dict["ensemble"] = np.maximum(probs_dict["resnet34"], probs_dict["yolov8"])
 
     # --- Evaluate at each threshold ---
     print(f"\n{'='*60}")

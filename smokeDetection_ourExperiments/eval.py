@@ -303,9 +303,11 @@ def evaluate(args) -> None:
     else:
         dataset = SmokeDataset(
             root=args.data_root,
+            n_frames=args.n_frames,
             frame_gap=args.frame_gap,
             transform=get_transforms(train=False),
             precomputed=args.precomputed,
+            cache_root=args.cache_root,
         )
 
     loader = DataLoader(
@@ -421,8 +423,13 @@ if __name__ == "__main__":
                         help="Use FIgLib-specific timestamp-aware loader (figlib_dataset.py)")
     parser.add_argument("--figlib_max_gap", type=float, default=5.0,
                         help="Max time gap (minutes) between paired FIgLib images (default: 5)")
+    parser.add_argument("--n_frames", type=int, default=2,
+                        help="Frames per sample window — must match the trained checkpoint (default: 2)")
     parser.add_argument("--frame_gap", type=int, default=1,
-                        help="Frame gap for SmokeDataset (ignored if --figlib)")
+                        help="Frame gap for SmokeDataset — must match the trained checkpoint (default: 1)")
+    parser.add_argument("--cache_root", default=None,
+                        help="Path to pre-computed LBP cache dir for this frame_gap "
+                             "(e.g. lbp_cache/gap_1). Highly recommended — avoids slow on-the-fly computation.")
     parser.add_argument("--precomputed", action="store_true",
                         help="Images are pre-computed LBP-motion images (skips feature extraction)")
     parser.add_argument("--batch_size", type=int, default=32)

@@ -88,7 +88,7 @@ def print_table(rows: list[dict], sort_by: str) -> None:
 
     print()
     best_dr = max(rows, key=lambda r: r["det_rate"])
-    valid   = [r for r in rows if r["mean_time"] == r["mean_time"]]
+    valid   = [r for r in rows if r["mean_time"] is not None and r["mean_time"] == r["mean_time"]]
     best_mt = min(valid, key=lambda r: r["mean_time"]) if valid else None
 
     print("Best runs:")

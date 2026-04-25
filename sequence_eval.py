@@ -557,8 +557,9 @@ def main() -> None:
     # Per-sequence CSV for each pipeline
     for pipeline, results in pipeline_results.items():
         csv_path = out_dir / f"{pipeline}_per_sequence.csv"
+        fieldnames = list(results[0].keys()) if results else ["sequence", "detected", "first_detection_s"]
         with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["sequence", "detected", "first_detection_s"])
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(results)
 

@@ -258,15 +258,27 @@ def gate_first_detection(
     ensemble_threshold: float,
 ) -> int | None:
     """
-    Gate pipeline: LBP+MobileNet fires first; if so, OR ensemble runs on last frame.
-    Returns offset of first combined detection, or None.
+    Gate pipeline: once LBP+MobileNet fires at offset G, run the OR ensemble on
+    all frames at offset >= G and return the first ensemble detection.
+    This avoids exact-frame alignment issues where MobileNet and the ensemble
+    fire at different offsets.
     """
+    gate_offset = None
     for offset, mob_prob in mob_scores:
         if mob_prob >= gate_threshold:
-            r = resnet_by_offset.get(offset, 0.0)
-            y = yolo_by_offset.get(offset, 0.0)
-            if max(r, y) >= ensemble_threshold:
-                return offset
+            gate_offset = offset
+            break
+
+    if gate_offset is None:
+        return None
+
+    # Run ensemble on all frames from gate_offset onwards
+    all_offsets = sorted(o for o in resnet_by_offset if o >= gate_offset)
+    for offset in all_offsets:
+        r = resnet_by_offset.get(offset, 0.0)
+        y = yolo_by_offset.get(offset, 0.0)
+        if max(r, y) >= ensemble_threshold:
+            return offset
     return None
 
 

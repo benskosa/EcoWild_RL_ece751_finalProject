@@ -358,10 +358,10 @@ Only post-ignition frames (offset ≥ 0 in the EcoWild filename convention) are
 evaluated. Supported pipelines: MobileNet standalone, ResNet34 standalone,
 YOLOv8 standalone, OR ensemble, and LBP-gate → ensemble.
 
-**Step 1 — Run all 16 MobileNet sweep configs:**
+**Step 1 — Sweep all 16 MobileNet configs:**
 ```bash
-chmod +x sequence_eval_sweep.sh
-./sequence_eval_sweep.sh --threshold 0.5
+chmod +x sequence_eval_mobilenet_sweep.sh
+./sequence_eval_mobilenet_sweep.sh --threshold 0.5
 ```
 
 **Step 2 — Identify the best MobileNet config:**
@@ -370,11 +370,17 @@ python smokeDetection_ourExperiments/summarize_sequence_eval.py \
     --eval_dir seq_eval_results --no_plots
 ```
 
-**Step 3 — Run baselines + gate pipeline with the best config:**
+**Step 3 — Final comparison: baseline ensemble vs. best MobileNet vs. gate pipeline:**
 ```bash
+chmod +x sequence_eval_final_comparison.sh
 # Replace 2 / 1 with the best n_frames / frame_gap from step 2
-./sequence_eval_sweep.sh --with_baselines --threshold 0.5 --best_nf 2 --best_gap 1
+./sequence_eval_final_comparison.sh --best_nf 2 --best_gap 1 --threshold 0.5
 ```
+
+This evaluates three pipelines side by side:
+1. ResNet34 + YOLOv8 OR ensemble (baseline)
+2. Best LBP+MobileNet standalone
+3. LBP+MobileNet gate → OR ensemble
 
 Outputs per run:
 - `seq_eval_results/<run>/sequence_summary.json` — aggregate stats

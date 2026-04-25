@@ -372,9 +372,14 @@ def main() -> None:
 
     if args.resnet_ckpt:
         ckpt = torch.load(args.resnet_ckpt, map_location=device)
+        # Support: our format {"state_dict": ...}, common {"model": ...}, or raw state dict
+        if isinstance(ckpt, dict):
+            state_dict = ckpt.get("state_dict") or ckpt.get("model") or ckpt.get("model_state_dict") or ckpt
+        else:
+            state_dict = ckpt
         resnet_model = models.resnet34()
         resnet_model.fc = nn.Linear(resnet_model.fc.in_features, 2)
-        resnet_model.load_state_dict(ckpt["state_dict"])
+        resnet_model.load_state_dict(state_dict)
         resnet_model.to(device).eval()
         print(f"ResNet34 loaded : {args.resnet_ckpt}")
 

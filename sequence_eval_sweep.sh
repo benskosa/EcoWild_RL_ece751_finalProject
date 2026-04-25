@@ -25,17 +25,22 @@ YOLO_CKPT="$SCRIPT_DIR/smokeDetection_baseline_ecoWild/Train/runs/yolov8n_baseli
 # --- Parse arguments --------------------------------------------------------
 THRESHOLD="0.5"
 WITH_BASELINES=0
+BEST_NF="2"
+BEST_GAP="1"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --threshold) THRESHOLD="$2"; shift 2 ;;
+        --threshold)     THRESHOLD="$2"; shift 2 ;;
         --with_baselines) WITH_BASELINES=1; shift ;;
+        --best_nf)       BEST_NF="$2"; shift 2 ;;
+        --best_gap)      BEST_GAP="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
 
 echo "Threshold        : $THRESHOLD"
 echo "With baselines   : $WITH_BASELINES"
+echo "Gate model       : nf${BEST_NF}_gap${BEST_GAP}"
 echo "Output root      : $OUT_ROOT"
 echo ""
 
@@ -89,7 +94,7 @@ if [ "$WITH_BASELINES" -eq 1 ]; then
     echo "  (uses nf2_gap1 as the gate — adjust if you find a better one)"
     echo "============================================================"
 
-    BEST_CKPT="$SWEEP_CKPTS/nf2_gap1/nf2_gap1_best_acc.pt"
+    BEST_CKPT="$SWEEP_CKPTS/nf${BEST_NF}_gap${BEST_GAP}/nf${BEST_NF}_gap${BEST_GAP}_best_acc.pt"
 
     if [ -f "$BEST_CKPT" ] && [ -f "$RESNET_CKPT" ] && [ -f "$YOLO_CKPT" ]; then
         python "$SEQ_EVAL" \
@@ -97,11 +102,11 @@ if [ "$WITH_BASELINES" -eq 1 ]; then
             --mobilenet_ckpt "$BEST_CKPT" \
             --resnet_ckpt    "$RESNET_CKPT" \
             --yolo_ckpt      "$YOLO_CKPT" \
-            --n_frames       2 \
-            --frame_gap      1 \
-            --cache_root     "$CACHE_ROOT/gap_1" \
+            --n_frames       "$BEST_NF" \
+            --frame_gap      "$BEST_GAP" \
+            --cache_root     "$CACHE_ROOT/gap_${BEST_GAP}" \
             --threshold      "$THRESHOLD" \
-            --out_dir        "$OUT_ROOT/gate_nf2_gap1"
+            --out_dir        "$OUT_ROOT/gate_nf${BEST_NF}_gap${BEST_GAP}"
     else
         echo "WARNING: one or more checkpoints missing for gate pipeline, skipping."
     fi

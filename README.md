@@ -25,6 +25,8 @@ ensemble models.
    - [Training](#training)
    - [Evaluation](#evaluation)
    - [Grid Sweep](#grid-sweep)
+   - [Test Set Evaluation](#test-set-evaluation)
+   - [Sequence-Level Evaluation](#sequence-level-evaluation)
 6. [Visualization Tools](#6-visualization-tools)
 7. [Results](#7-results)
 8. [To-Do / Pending Experiments](#8-to-do--pending-experiments)
@@ -316,6 +318,77 @@ Produces:
 - `sweep_results/plots/heatmap_tpr.png`
 - `sweep_results/plots/heatmap_fpr.png`
 
+### Test Set Evaluation
+
+After training, evaluate all 16 sweep checkpoints on the held-out test set.
+
+**Step 1 — Precompute LBP cache for the test split:**
+```bash
+# From project root
+chmod +x precompute_test_cache.sh
+./precompute_test_cache.sh
+```
+
+**Step 2 — Run evaluation at a chosen threshold (e.g. 0.75 to match paper):**
+```bash
+chmod +x eval_mobilenet_test.sh
+./eval_mobilenet_test.sh 0.75
+```
+
+Results are written to `smokeDetection_ourExperiments/sweep_results/eval_test/nf{N}_gap{G}/eval_results.json`.
+
+**Step 3 — Summarize results and generate heatmaps:**
+```bash
+python smokeDetection_ourExperiments/summarize_sweep_eval.py \
+    --eval_dir smokeDetection_ourExperiments/sweep_results/eval_test \
+    --verbose
+```
+
+Produces a sorted table (TPR, FPR, F1, AUC, Accuracy) and heatmap PNGs in
+`eval_test/plots/`.
+
+### Sequence-Level Evaluation
+
+Frame-level metrics don't capture practical detection effectiveness.
+`sequence_eval.py` measures per fire sequence:
+1. **Detection rate** — did the pipeline detect smoke at least once?
+2. **Time to first detection** — seconds after ignition of first positive prediction
+
+Only post-ignition frames (offset ≥ 0 in the EcoWild filename convention) are
+evaluated. Supported pipelines: MobileNet standalone, ResNet34 standalone,
+YOLOv8 standalone, OR ensemble, and LBP-gate → ensemble.
+
+**Step 1 — Run all 16 MobileNet sweep configs:**
+```bash
+chmod +x sequence_eval_sweep.sh
+./sequence_eval_sweep.sh --threshold 0.5
+```
+
+**Step 2 — Identify the best MobileNet config:**
+```bash
+python smokeDetection_ourExperiments/summarize_sequence_eval.py \
+    --eval_dir seq_eval_results --no_plots
+```
+
+**Step 3 — Run baselines + gate pipeline with the best config:**
+```bash
+# Replace 2 / 1 with the best n_frames / frame_gap from step 2
+./sequence_eval_sweep.sh --with_baselines --threshold 0.5 --best_nf 2 --best_gap 1
+```
+
+Outputs per run:
+- `seq_eval_results/<run>/sequence_summary.json` — aggregate stats
+- `seq_eval_results/<run>/<pipeline>_per_sequence.csv` — per-sequence rows
+
+**Step 4 — Heatmaps across the MobileNet sweep grid:**
+```bash
+python smokeDetection_ourExperiments/summarize_sequence_eval.py \
+    --eval_dir seq_eval_results
+```
+
+Produces `seq_eval_results/plots/heatmap_det_rate.png`,
+`heatmap_mean_time.png`, `heatmap_median_time.png`.
+
 ---
 
 ## 6. Visualization Tools
@@ -397,9 +470,14 @@ python plot_history.py \
 - [ ] Run ResNet34 baseline training to completion
 - [ ] Run YOLOv8n baseline training to completion
 - [ ] Re-run grid sweep on new 70/15/15 split
-- [ ] Write unified evaluator comparing all models on the test set
+- [x] Precompute test LBP cache (`precompute_test_cache.sh`)
+- [x] Frame-level test evaluation for all 16 MobileNet sweep configs (`eval_mobilenet_test.sh`)
+- [x] Summarize frame-level test eval with table + heatmaps (`summarize_sweep_eval.py`)
+- [x] Sequence-level evaluation: detection rate + time to first detection (`sequence_eval.py`, `sequence_eval_sweep.sh`)
+- [x] Summarize sequence-level eval with table + heatmaps (`summarize_sequence_eval.py`)
+- [x] LBP gate → ResNet/YOLOv8 OR ensemble pipeline (implemented in `sequence_eval.py`)
+- [ ] Fill in Results tables in README once training/eval completes
 - [ ] Clarify energy metric definitions (E_comm, E_total, "min") from paper authors
-- [ ] Implement LBP gate → ResNet/YOLOv8 ensemble pipeline
 - [ ] Recreate Table 2 with final numbers
 
 ---

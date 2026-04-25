@@ -144,9 +144,10 @@ def get_mobilenet_scores(
     target_size: tuple[int, int] = (240, 180),
 ) -> list[tuple[int, float]]:
     """
-    Returns list of (offset_seconds, smoke_probability) for each valid window
-    that starts at or after post_start.
-    The reported offset is that of the LAST frame in the window.
+    Returns list of (first_offset, last_offset, smoke_probability) for each
+    valid window that starts at or after post_start.
+    first_offset = offset of the first frame in the window.
+    last_offset  = offset of the last frame in the window.
     """
     from feature_extraction import make_lbp_motion_image_nframes
 
@@ -155,7 +156,8 @@ def get_mobilenet_scores(
 
     for start in range(post_start, len(frames) - window_span):
         window = [frames[start + i * frame_gap] for i in range(n_frames)]
-        last_offset = parse_offset(window[-1])
+        first_offset = parse_offset(window[0])
+        last_offset  = parse_offset(window[-1])
 
         if n_frames == 2:
             img = _load_lbp_pair(window[0], window[1], start, cache_seq_dir, target_size)
@@ -180,7 +182,7 @@ def get_mobilenet_scores(
         with torch.no_grad():
             logit = model(tensor).squeeze()
             prob  = torch.sigmoid(logit).item()
-        scores.append((last_offset, prob))
+        scores.append((first_offset, last_offset, prob))
 
     return scores
 
@@ -242,31 +244,40 @@ def get_yolo_scores(
 # Detection helpers
 # ---------------------------------------------------------------------------
 
-def first_detection(scores: list[tuple[int, float]], threshold: float) -> int | None:
-    """Return the offset (seconds) of first score >= threshold, or None."""
-    for offset, prob in scores:
+def first_detection(scores: list, threshold: float) -> int | None:
+    """
+    Return the reported offset of the first score >= threshold, or None.
+    Accepts either (offset, prob) tuples (ResNet/YOLOv8)
+    or (first_offset, last_offset, prob) tuples (MobileNet windows).
+    For MobileNet, returns first_offset (start of the triggering window).
+    """
+    for entry in scores:
+        if len(entry) == 3:
+            offset, _, prob = entry
+        else:
+            offset, prob = entry
         if prob >= threshold:
             return offset
     return None
 
 
 def gate_first_detection(
-    mob_scores: list[tuple[int, float]],
+    mob_scores: list[tuple[int, int, float]],
     resnet_by_offset: dict[int, float],
     yolo_by_offset: dict[int, float],
     gate_threshold: float,
     ensemble_threshold: float,
 ) -> int | None:
     """
-    Gate pipeline: once LBP+MobileNet fires at offset G, run the OR ensemble on
-    all frames at offset >= G and return the first ensemble detection.
-    This avoids exact-frame alignment issues where MobileNet and the ensemble
-    fire at different offsets.
+    Gate pipeline: once LBP+MobileNet fires, the OR ensemble runs on all frames
+    from the start of that window onwards.
+    gate_offset = first frame of the triggering MobileNet window, so the ensemble
+    gets to check frames that overlap with (or follow) the window MobileNet flagged.
     """
     gate_offset = None
-    for offset, mob_prob in mob_scores:
+    for first_offset, last_offset, mob_prob in mob_scores:
         if mob_prob >= gate_threshold:
-            gate_offset = offset
+            gate_offset = first_offset
             break
 
     if gate_offset is None:

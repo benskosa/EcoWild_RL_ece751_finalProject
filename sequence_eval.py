@@ -267,30 +267,39 @@ def gate_first_detection(
     yolo_by_offset: dict[int, float],
     gate_threshold: float,
     ensemble_threshold: float,
-) -> int | None:
+    from_start: bool = False,
+) -> tuple[int | None, int | None]:
     """
-    Gate pipeline: once LBP+MobileNet fires, the OR ensemble runs on all frames
-    from the start of that window onwards.
-    gate_offset = first frame of the triggering MobileNet window, so the ensemble
-    gets to check frames that overlap with (or follow) the window MobileNet flagged.
+    Gate pipeline: once LBP+MobileNet fires, run the OR ensemble and return
+    the first ensemble detection.
+
+    Returns (mob_gate_offset, ensemble_det_offset):
+      mob_gate_offset    -- first_offset of the MobileNet window that triggered
+                            the gate (None if MobileNet never fired)
+      ensemble_det_offset -- offset of the first ensemble detection (None if
+                            ensemble never confirmed)
+
+    from_start=False (default): ensemble searches from mob_gate_offset onwards.
+    from_start=True:            ensemble searches from the very first
+                                post-ignition frame, regardless of when
+                                MobileNet fired.
     """
-    gate_offset = None
+    mob_gate_offset = None
     for first_offset, last_offset, mob_prob in mob_scores:
         if mob_prob >= gate_threshold:
-            gate_offset = first_offset
+            mob_gate_offset = first_offset
             break
 
-    if gate_offset is None:
-        return None
+    if mob_gate_offset is None:
+        return None, None
 
-    # Run ensemble on all frames from gate_offset onwards
-    all_offsets = sorted(o for o in resnet_by_offset if o >= gate_offset)
-    for offset in all_offsets:
+    search_from = min(resnet_by_offset) if from_start else mob_gate_offset
+    for offset in sorted(o for o in resnet_by_offset if o >= search_from):
         r = resnet_by_offset.get(offset, 0.0)
         y = yolo_by_offset.get(offset, 0.0)
         if max(r, y) >= ensemble_threshold:
-            return offset
-    return None
+            return mob_gate_offset, offset
+    return mob_gate_offset, None
 
 
 # ---------------------------------------------------------------------------
@@ -298,19 +307,33 @@ def gate_first_detection(
 # ---------------------------------------------------------------------------
 
 def aggregate(seq_results: list[dict]) -> dict:
-    detected     = [r for r in seq_results if r["detected"]]
-    times        = [r["first_detection_s"] for r in detected]
+    detected = [r for r in seq_results if r["detected"]]
+    times    = [r["first_detection_s"] for r in detected]
 
-    return {
-        "n_sequences":              len(seq_results),
-        "n_detected":               len(detected),
-        "detection_rate":           round(len(detected) / len(seq_results), 4) if seq_results else 0,
-        "mean_time_to_detection_s": round(float(np.mean(times)),   1) if times else None,
+    out = {
+        "n_sequences":                len(seq_results),
+        "n_detected":                 len(detected),
+        "detection_rate":             round(len(detected) / len(seq_results), 4) if seq_results else 0,
+        "mean_time_to_detection_s":   round(float(np.mean(times)),   1) if times else None,
         "median_time_to_detection_s": round(float(np.median(times)), 1) if times else None,
-        "min_time_to_detection_s":  int(min(times))  if times else None,
-        "max_time_to_detection_s":  int(max(times))  if times else None,
-        "detection_times_s":        sorted(times),
+        "min_time_to_detection_s":    int(min(times))  if times else None,
+        "max_time_to_detection_s":    int(max(times))  if times else None,
+        "detection_times_s":          sorted(times),
     }
+
+    # Gate-specific stats (present only when mob_gate_s field exists)
+    gate_rows = [r for r in seq_results if "mob_gate_s" in r]
+    if gate_rows:
+        fired      = [r["mob_gate_s"] for r in gate_rows if r["mob_gate_s"] is not None]
+        no_confirm = [r for r in gate_rows if r["mob_gate_s"] is not None and not r["detected"]]
+        out.update({
+            "n_mob_fired":                  len(fired),
+            "n_mob_fired_no_ensemble":       len(no_confirm),
+            "mean_mob_gate_s":              round(float(np.mean(fired)),   1) if fired else None,
+            "median_mob_gate_s":            round(float(np.median(fired)), 1) if fired else None,
+        })
+
+    return out
 
 
 def print_summary(name: str, agg: dict) -> None:
@@ -327,6 +350,19 @@ def print_summary(name: str, agg: dict) -> None:
               f"{agg['max_time_to_detection_s']} s")
     else:
         print(f"    No sequences detected — time to detection N/A")
+
+    # Gate-specific breakdown
+    if "n_mob_fired" in agg:
+        n_never = agg["n_sequences"] - agg["n_mob_fired"]
+        print(f"    --- Gate breakdown ---")
+        print(f"    MobileNet fired     : {agg['n_mob_fired']}  "
+              f"({n_never} sequences MobileNet never triggered)")
+        if agg["mean_mob_gate_s"] is not None:
+            print(f"    Mean MobileNet gate : {agg['mean_mob_gate_s']} s  "
+                  f"({agg['mean_mob_gate_s']/60:.1f} min)")
+            print(f"    Median MobileNet gate: {agg['median_mob_gate_s']} s  "
+                  f"({agg['median_mob_gate_s']/60:.1f} min)")
+        print(f"    Mob fired, ensemble missed: {agg['n_mob_fired_no_ensemble']}")
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +392,9 @@ def main() -> None:
     parser.add_argument("--out_dir",     default="seq_eval_results",
                         help="Output directory for JSON, CSV, and summary")
     parser.add_argument("--device",      default=None)
+    parser.add_argument("--gate_from_start", action="store_true",
+                        help="Gate pipeline: run ensemble from the first post-ignition "
+                             "frame once MobileNet fires, rather than from the gate offset")
     args = parser.parse_args()
 
     if not any([args.mobilenet_ckpt, args.resnet_ckpt, args.yolo_ckpt]):
@@ -412,14 +451,17 @@ def main() -> None:
         print(f"YOLOv8 loaded   : {args.yolo_ckpt}")
 
     # --- Per-sequence evaluation --------------------------------------------
+    gate_label = "gate_from_start" if args.gate_from_start else "gate_from_window"
     pipeline_results: dict[str, list[dict]] = {
         name: [] for name in
-        (["mobilenet"]                                    if mob_model    else []) +
-        (["resnet34"]                                     if resnet_model else []) +
-        (["yolov8"]                                       if yolo_model   else []) +
-        (["ensemble_OR"]                                  if resnet_model and yolo_model else []) +
-        (["gate_mobilenet_ensemble"]                      if mob_model and resnet_model and yolo_model else [])
+        (["mobilenet"]      if mob_model    else []) +
+        (["resnet34"]       if resnet_model else []) +
+        (["yolov8"]         if yolo_model   else []) +
+        (["ensemble_OR"]    if resnet_model and yolo_model else []) +
+        ([gate_label]       if mob_model and resnet_model and yolo_model else [])
     }
+    print(f"Gate mode       : {'from_start' if args.gate_from_start else 'from_window'}"
+          if mob_model and resnet_model and yolo_model else "")
 
     for seq_dir in tqdm(seq_dirs, desc="Sequences", unit="seq"):
         frames, post_start = load_sequence(seq_dir)
@@ -484,9 +526,17 @@ def main() -> None:
             record("ensemble_OR", first_detection(ensemble_scores, args.threshold))
 
         if mob_model and resnet_model and yolo_model:
-            record("gate_mobilenet_ensemble",
-                   gate_first_detection(mob_scores, resnet_by_offset, yolo_by_offset,
-                                        args.threshold, args.threshold))
+            mob_gate_s, ensemble_det_s = gate_first_detection(
+                mob_scores, resnet_by_offset, yolo_by_offset,
+                args.threshold, args.threshold,
+                from_start=args.gate_from_start,
+            )
+            pipeline_results[gate_label].append({
+                "sequence":          seq_id,
+                "detected":          ensemble_det_s is not None,
+                "first_detection_s": ensemble_det_s,
+                "mob_gate_s":        mob_gate_s,
+            })
 
     # --- Summary ------------------------------------------------------------
     print(f"\n{'='*60}")

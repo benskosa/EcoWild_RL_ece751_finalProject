@@ -27,14 +27,16 @@ YOLO_CKPT="$SCRIPT_DIR/smokeDetection_baseline_ecoWild/Train/runs/yolov8n_baseli
 THRESHOLD="0.5"
 BEST_NF=""
 BEST_GAP=""
+GATE_FROM_START=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --threshold)   THRESHOLD="$2";   shift 2 ;;
-        --best_nf)     BEST_NF="$2";     shift 2 ;;
-        --best_gap)    BEST_GAP="$2";    shift 2 ;;
-        --resnet_ckpt) RESNET_CKPT="$2"; shift 2 ;;
-        --yolo_ckpt)   YOLO_CKPT="$2";   shift 2 ;;
+        --threshold)      THRESHOLD="$2";      shift 2 ;;
+        --best_nf)        BEST_NF="$2";        shift 2 ;;
+        --best_gap)       BEST_GAP="$2";       shift 2 ;;
+        --resnet_ckpt)    RESNET_CKPT="$2";    shift 2 ;;
+        --yolo_ckpt)      YOLO_CKPT="$2";      shift 2 ;;
+        --gate_from_start) GATE_FROM_START="--gate_from_start"; shift ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -105,6 +107,7 @@ python "$SEQ_EVAL" \
     --frame_gap      "$BEST_GAP" \
     --cache_root     "$CACHE_ROOT/gap_${BEST_GAP}" \
     --threshold      "$THRESHOLD" \
+    $GATE_FROM_START \
     --out_dir        "$OUT_ROOT/gate_nf${BEST_NF}_gap${BEST_GAP}"
 
 echo ""

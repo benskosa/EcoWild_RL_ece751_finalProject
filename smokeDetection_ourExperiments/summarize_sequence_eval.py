@@ -76,10 +76,11 @@ def print_table(rows: list[dict], sort_by: str) -> None:
     print("-" * 105)
 
     for r in rows:
-        mean_t = f"{r['mean_time']:>10.0f}" if r['mean_time'] == r['mean_time'] else f"{'N/A':>10}"
-        med_t  = f"{r['med_time']:>9.0f}"  if r['med_time']  == r['med_time']  else f"{'N/A':>9}"
-        min_t  = f"{r['min_time']:>9.0f}"  if r['min_time']  == r['min_time']  else f"{'N/A':>9}"
-        max_t  = f"{r['max_time']:>9.0f}"  if r['max_time']  == r['max_time']  else f"{'N/A':>9}"
+        def fmt_t(v, w): return f"{v:>{w}.0f}" if (v is not None and v == v) else f"{'N/A':>{w}}"
+        mean_t = fmt_t(r['mean_time'], 10)
+        med_t  = fmt_t(r['med_time'],   9)
+        min_t  = fmt_t(r['min_time'],   9)
+        max_t  = fmt_t(r['max_time'],   9)
 
         print(f"{r['run']:<26} {r['n_frames']:>3} {r['gap']:>4} {r['thresh']:>5.2f} "
               f"{r['n_seq']:>6} {r['n_det']:>6} {r['det_rate']:>8.3f} "

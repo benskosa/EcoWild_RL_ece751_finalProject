@@ -30,9 +30,11 @@ BEST_GAP=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --threshold) THRESHOLD="$2"; shift 2 ;;
-        --best_nf)   BEST_NF="$2";   shift 2 ;;
-        --best_gap)  BEST_GAP="$2";  shift 2 ;;
+        --threshold)   THRESHOLD="$2";   shift 2 ;;
+        --best_nf)     BEST_NF="$2";     shift 2 ;;
+        --best_gap)    BEST_GAP="$2";    shift 2 ;;
+        --resnet_ckpt) RESNET_CKPT="$2"; shift 2 ;;
+        --yolo_ckpt)   YOLO_CKPT="$2";   shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done

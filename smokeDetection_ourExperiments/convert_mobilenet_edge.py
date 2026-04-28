@@ -440,7 +440,7 @@ def main() -> None:
     print(f"Loading checkpoint: {ckpt_path}")
     ckpt    = torch.load(ckpt_path, map_location="cpu")
     variant = ckpt.get("variant", "v3_small")
-    model   = build_model(variant=variant, pretrained=False)
+    model   = build_model(variant=variant)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
     print(f"  Variant : {variant}")

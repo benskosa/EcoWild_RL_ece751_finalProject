@@ -1,0 +1,52 @@
+{
+  "threshold": 0.75,
+  "pipelines": {
+    "mobilenet": {
+      "n_sequences": 42,
+      "n_detected": 36,
+      "detection_rate": 0.8571,
+      "mean_time_to_detection_s": 535.0,
+      "median_time_to_detection_s": 416.0,
+      "min_time_to_detection_s": 120,
+      "max_time_to_detection_s": 2220,
+      "detection_times_s": [
+        120,
+        120,
+        121,
+        121,
+        179,
+        180,
+        180,
+        180,
+        180,
+        181,
+        240,
+        240,
+        300,
+        300,
+        360,
+        360,
+        360,
+        412,
+        420,
+        420,
+        540,
+        540,
+        544,
+        600,
+        600,
+        660,
+        660,
+        720,
+        720,
+        723,
+        840,
+        960,
+        1258,
+        1261,
+        1440,
+        2220
+      ]
+    }
+  }
+}

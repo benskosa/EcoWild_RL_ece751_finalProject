@@ -1,0 +1,15 @@
+{
+  "threshold": 0.75,
+  "pipelines": {
+    "mobilenet": {
+      "n_sequences": 42,
+      "n_detected": 0,
+      "detection_rate": 0.0,
+      "mean_time_to_detection_s": null,
+      "median_time_to_detection_s": null,
+      "min_time_to_detection_s": null,
+      "max_time_to_detection_s": null,
+      "detection_times_s": []
+    }
+  }
+}

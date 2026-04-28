@@ -90,7 +90,7 @@ def export_onnx(
         dummy,
         str(onnx_path),
         export_params=True,
-        opset_version=11,
+        opset_version=18,       # 18 is the stable default for PyTorch >= 2.1
         do_constant_folding=True,
         input_names=["input"],
         output_names=["logit"],
@@ -98,6 +98,7 @@ def export_onnx(
             "input": {0: "batch_size"},
             "logit": {0: "batch_size"},
         },
+        dynamo=False,           # use legacy exporter; avoids dynamic_axes warning
     )
     print(f"ONNX model saved: {onnx_path}")
 
@@ -113,18 +114,21 @@ class _Int8Calibrator:
     so it can choose optimal INT8 scale factors per layer.
     """
     def __init__(self, calib_dir: Path, imgsz: int, n_batches: int = 50):
-        import torchvision.transforms as T
         from PIL import Image as PILImage
 
         self.imgsz = imgsz
         self.index = 0
         self.cache_file = str(calib_dir / "int8_calib.cache")
 
-        transform = T.Compose([
-            T.Resize((imgsz, imgsz)),
-            T.ToTensor(),
-            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
+        _mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        _std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+        def preprocess(path: Path) -> np.ndarray:
+            img = PILImage.open(path).convert("RGB").resize((imgsz, imgsz))
+            arr = np.array(img, dtype=np.float32) / 255.0          # HWC [0,1]
+            arr = (arr - _mean) / _std                              # normalize
+            arr = arr.transpose(2, 0, 1)[np.newaxis]               # → NCHW
+            return np.ascontiguousarray(arr, dtype=np.float32)
 
         img_paths = sorted(calib_dir.rglob("*.jpg")) + sorted(calib_dir.rglob("*.png"))
         img_paths = sorted(img_paths)[:n_batches]
@@ -132,14 +136,12 @@ class _Int8Calibrator:
             raise FileNotFoundError(f"No .jpg/.png images found under {calib_dir}")
 
         print(f"  INT8 calibration: {len(img_paths)} images from {calib_dir}")
-        tensors = []
+        self.batches = []
         for p in img_paths:
             try:
-                img = PILImage.open(p).convert("RGB")
-                tensors.append(transform(img))
+                self.batches.append(preprocess(p))
             except Exception:
                 continue
-        self.batches = [t.unsqueeze(0).numpy() for t in tensors]
 
     # --- TensorRT IInt8EntropyCalibrator2 interface ---
     def get_batch_size(self) -> int:
@@ -277,22 +279,21 @@ def export_ort_int8(onnx_path: Path, ort_int8_path: Path, calib_dir: Path | None
         return
 
     if calib_dir is not None:
-        import torchvision.transforms as T
         from PIL import Image as PILImage
 
         class _DataReader(CalibrationDataReader):
             def __init__(self, calib_dir: Path, imgsz: int, n: int = 100):
-                transform = T.Compose([
-                    T.Resize((imgsz, imgsz)),
-                    T.ToTensor(),
-                    T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-                ])
+                _mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+                _std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
                 paths = sorted(list(calib_dir.rglob("*.jpg")) + list(calib_dir.rglob("*.png")))[:n]
                 self.data = []
                 for p in paths:
                     try:
-                        img = PILImage.open(p).convert("RGB")
-                        self.data.append({"input": transform(img).unsqueeze(0).numpy()})
+                        img = PILImage.open(p).convert("RGB").resize((imgsz, imgsz))
+                        arr = np.array(img, dtype=np.float32) / 255.0
+                        arr = (arr - _mean) / _std
+                        arr = arr.transpose(2, 0, 1)[np.newaxis]
+                        self.data.append({"input": np.ascontiguousarray(arr)})
                     except Exception:
                         continue
                 self.iter = iter(self.data)

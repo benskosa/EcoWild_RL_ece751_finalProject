@@ -66,11 +66,26 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.onnx
 
-# Allow imports from this directory
-sys.path.insert(0, str(Path(__file__).parent))
-from model import build_model
+
+def build_model(variant: str = "v3_small") -> nn.Module:
+    """Rebuild the MobileNet binary classifier head — mirrors model.py exactly."""
+    import torchvision.models as tvm
+    if variant == "v3_small":
+        model = tvm.mobilenet_v3_small(weights=None)
+        model.classifier[3] = nn.Linear(model.classifier[3].in_features, 1)
+    elif variant == "v2":
+        model = tvm.mobilenet_v2(weights=None)
+        in_features = model.classifier[1].in_features
+        model.classifier = nn.Sequential(
+            nn.Dropout(p=0.2, inplace=True),
+            nn.Linear(in_features, 1),
+        )
+    else:
+        raise ValueError(f"Unknown variant '{variant}'")
+    return model
 
 
 # ---------------------------------------------------------------------------

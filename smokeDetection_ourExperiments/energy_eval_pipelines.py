@@ -360,18 +360,25 @@ def load_resnet(ckpt_path: str, gpu_device: torch.device):
 
 
 def load_yolo(ckpt_path: str):
+    ext = Path(ckpt_path).suffix.lower()
+
+    if ext == ".onnx":
+        # Use ONNX Runtime directly — no ultralytics needed
+        session = _ort_session(ckpt_path, use_gpu=False)
+        print(f"  YOLOv8 loaded    : {ckpt_path}  (ONNX Runtime)")
+        return ("onnx", session)
+
+    # .pt / .trt — use ultralytics
     import functools
     from ultralytics import YOLO
-
-    # Ultralytics handles .pt, .onnx, and .trt natively
     orig = torch.load
     torch.load = functools.partial(orig, weights_only=False)
     try:
         model = YOLO(ckpt_path)
     finally:
         torch.load = orig
-    print(f"  YOLOv8 loaded    : {ckpt_path}")
-    return model
+    print(f"  YOLOv8 loaded    : {ckpt_path}  (Ultralytics)")
+    return ("ultralytics", model)
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +421,20 @@ def infer_resnet(frame_path: Path, model_tuple, device) -> float:
 
 
 def infer_yolo(frame_path: Path, yolo_model, imgsz: int = 224) -> float:
-    results = yolo_model.predict(source=str(frame_path), imgsz=imgsz, verbose=False)
+    fmt, model = yolo_model
+    if fmt == "onnx":
+        from PIL import Image as PILImage
+        _mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        _std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        img = PILImage.open(frame_path).convert("RGB").resize((imgsz, imgsz))
+        arr = np.array(img, dtype=np.float32) / 255.0
+        arr = (arr - _mean) / _std
+        arr = arr.transpose(2, 0, 1)[np.newaxis].astype(np.float32)
+        logits = model.run(None, {"input": arr})[0]
+        probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
+        return float(probs[0, 1])
+    # ultralytics
+    results = model.predict(source=str(frame_path), imgsz=imgsz, verbose=False)
     return float(results[0].probs.data[1].item())
 
 

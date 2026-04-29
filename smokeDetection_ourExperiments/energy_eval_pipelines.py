@@ -151,12 +151,15 @@ class JtopMonitor(_BasePowerMonitor):
             while not self._stop.is_set():
                 t = time.perf_counter()
                 try:
-                    p = jetson.power[1]['tot']['cur']   # jtop 4.x
+                    p = jetson.power['tot']['power']    # jtop 7.x
                 except (KeyError, TypeError, AttributeError):
                     try:
-                        p = jetson.stats['Power TOT']   # jtop 3.x
-                    except (KeyError, TypeError):
-                        p = None
+                        p = jetson.power[1]['tot']['cur']  # jtop 4.x
+                    except (KeyError, TypeError, AttributeError):
+                        try:
+                            p = jetson.stats['Power TOT']  # jtop 3.x
+                        except (KeyError, TypeError):
+                            p = None
                 if p is not None:
                     with self._lock:
                         self._readings.append((t, float(p)))

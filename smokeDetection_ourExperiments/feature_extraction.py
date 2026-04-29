@@ -14,6 +14,8 @@ Pipeline (per frame pair):
   6. Convert HSV → RGB                      → final LBP-motion image
 """
 
+from __future__ import annotations
+
 import cv2
 import numpy as np
 from skimage.feature import local_binary_pattern

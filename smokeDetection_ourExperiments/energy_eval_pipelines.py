@@ -306,36 +306,65 @@ def get_lbp_image(
 # Model loading
 # ---------------------------------------------------------------------------
 
+def _ort_session(ckpt_path: str, use_gpu: bool):
+    import onnxruntime as ort
+    providers = (["CUDAExecutionProvider", "CPUExecutionProvider"]
+                 if use_gpu else ["CPUExecutionProvider"])
+    return ort.InferenceSession(ckpt_path, providers=providers)
+
+
 def load_mobilenet(ckpt_path: str, cpu_device: torch.device):
-    from model import build_model, get_transforms
-    ckpt     = torch.load(ckpt_path, map_location=cpu_device)
-    variant  = ckpt.get("variant", "v3_small")
-    model    = build_model(variant=variant, pretrained=False)
+    from model import get_transforms
+    transform = get_transforms(train=False)
+    ext = Path(ckpt_path).suffix.lower()
+
+    if ext == ".onnx":
+        session = _ort_session(ckpt_path, use_gpu=False)
+        print(f"  MobileNet loaded : {ckpt_path}  (ONNX Runtime, device=cpu)")
+        return ("onnx", session), transform
+
+    # .pt / .pth — PyTorch checkpoint
+    from model import build_model
+    ckpt    = torch.load(ckpt_path, map_location=cpu_device)
+    variant = ckpt.get("variant", "v3_small")
+    model   = build_model(variant=variant)
     model.load_state_dict(ckpt["state_dict"])
     model.to(cpu_device).eval()
-    transform = get_transforms(train=False)
-    print(f"  MobileNet loaded : {ckpt_path}  (variant={variant}, device=cpu)")
-    return model, transform
+    print(f"  MobileNet loaded : {ckpt_path}  (PyTorch, variant={variant}, device=cpu)")
+    return ("torch", model), transform
 
 
 def load_resnet(ckpt_path: str, gpu_device: torch.device):
-    ckpt = torch.load(ckpt_path, map_location=gpu_device)
-    if isinstance(ckpt, dict):
-        sd = (ckpt.get("state_dict") or ckpt.get("model")
-              or ckpt.get("model_state_dict") or ckpt)
+    ext = Path(ckpt_path).suffix.lower()
+
+    if ext == ".onnx":
+        session = _ort_session(ckpt_path, use_gpu=(str(gpu_device) != "cpu"))
+        print(f"  ResNet34 loaded  : {ckpt_path}  (ONNX Runtime, device={gpu_device})")
+        return ("onnx", session)
+
+    # .pt / .pth — PyTorch checkpoint
     else:
         sd = ckpt
     model = models.resnet34()
     model.fc = nn.Linear(model.fc.in_features, 2)
     model.load_state_dict(sd)
     model.to(gpu_device).eval()
+<<<<<<< HEAD
     print(f"  ResNet34 loaded  : {ckpt_path}  (device={gpu_device})")
     return model
+=======
+    print(f"  ResNet34 loaded  : {ckpt_path}  (PyTorch, device={gpu_device})")
+    return ("torch", model)
+>>>>>>> b4d0ff6686b75bea1699bd34ab63d9f64806ac2f
 
 
 def load_yolo(ckpt_path: str):
     import functools
     from ultralytics import YOLO
+<<<<<<< HEAD
+=======
+    # Ultralytics handles .pt, .onnx, and .trt natively
+>>>>>>> b4d0ff6686b75bea1699bd34ab63d9f64806ac2f
     orig = torch.load
     torch.load = functools.partial(orig, weights_only=False)
     try:
@@ -357,6 +386,7 @@ _resnet_transform = transforms.Compose([
 ])
 
 
+<<<<<<< HEAD
 def infer_mobilenet(lbp_img: np.ndarray, model, transform, device) -> float:
     tensor = transform(Image.fromarray(lbp_img)).unsqueeze(0).to(device)
     with torch.no_grad():
@@ -369,6 +399,33 @@ def infer_resnet(frame_path: Path, model, device) -> float:
     tensor = _resnet_transform(img).unsqueeze(0).to(device)
     with torch.no_grad():
         logits = model(tensor)
+=======
+def infer_mobilenet(lbp_img: np.ndarray, model_tuple, transform, device) -> float:
+    fmt, model = model_tuple
+    img_tensor = transform(Image.fromarray(lbp_img)).unsqueeze(0)
+    if fmt == "onnx":
+        arr = img_tensor.numpy()
+        logit = model.run(["logit"], {"input": arr})[0].squeeze()
+        return float(1 / (1 + np.exp(-logit)))  # sigmoid
+    # torch
+    with torch.no_grad():
+        logit = model(img_tensor.to(device)).squeeze()
+        return torch.sigmoid(logit).item()
+
+
+def infer_resnet(frame_path: Path, model_tuple, device) -> float:
+    fmt, model = model_tuple
+    img = Image.open(frame_path).convert("RGB")
+    tensor = _resnet_transform(img).unsqueeze(0)
+    if fmt == "onnx":
+        arr = tensor.numpy()
+        logits = model.run(None, {"input": arr})[0]
+        probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
+        return float(probs[0, 1])
+    # torch
+    with torch.no_grad():
+        logits = model(tensor.to(device))
+>>>>>>> b4d0ff6686b75bea1699bd34ab63d9f64806ac2f
         return torch.softmax(logits, dim=1)[0, 1].item()
 
 

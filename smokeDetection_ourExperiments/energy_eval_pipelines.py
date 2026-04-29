@@ -349,22 +349,15 @@ def load_resnet(ckpt_path: str, gpu_device: torch.device):
     model.fc = nn.Linear(model.fc.in_features, 2)
     model.load_state_dict(sd)
     model.to(gpu_device).eval()
-<<<<<<< HEAD
-    print(f"  ResNet34 loaded  : {ckpt_path}  (device={gpu_device})")
-    return model
-=======
     print(f"  ResNet34 loaded  : {ckpt_path}  (PyTorch, device={gpu_device})")
     return ("torch", model)
->>>>>>> b4d0ff6686b75bea1699bd34ab63d9f64806ac2f
 
 
 def load_yolo(ckpt_path: str):
     import functools
     from ultralytics import YOLO
-<<<<<<< HEAD
-=======
+
     # Ultralytics handles .pt, .onnx, and .trt natively
->>>>>>> b4d0ff6686b75bea1699bd34ab63d9f64806ac2f
     orig = torch.load
     torch.load = functools.partial(orig, weights_only=False)
     try:
@@ -386,20 +379,6 @@ _resnet_transform = transforms.Compose([
 ])
 
 
-<<<<<<< HEAD
-def infer_mobilenet(lbp_img: np.ndarray, model, transform, device) -> float:
-    tensor = transform(Image.fromarray(lbp_img)).unsqueeze(0).to(device)
-    with torch.no_grad():
-        logit = model(tensor).squeeze()
-        return torch.sigmoid(logit).item()
-
-
-def infer_resnet(frame_path: Path, model, device) -> float:
-    img = Image.open(frame_path).convert("RGB")
-    tensor = _resnet_transform(img).unsqueeze(0).to(device)
-    with torch.no_grad():
-        logits = model(tensor)
-=======
 def infer_mobilenet(lbp_img: np.ndarray, model_tuple, transform, device) -> float:
     fmt, model = model_tuple
     img_tensor = transform(Image.fromarray(lbp_img)).unsqueeze(0)
@@ -425,7 +404,6 @@ def infer_resnet(frame_path: Path, model_tuple, device) -> float:
     # torch
     with torch.no_grad():
         logits = model(tensor.to(device))
->>>>>>> b4d0ff6686b75bea1699bd34ab63d9f64806ac2f
         return torch.softmax(logits, dim=1)[0, 1].item()
 
 

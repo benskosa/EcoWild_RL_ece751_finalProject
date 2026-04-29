@@ -430,7 +430,8 @@ def infer_yolo(frame_path: Path, yolo_model, imgsz: int = 224) -> float:
         arr = np.array(img, dtype=np.float32) / 255.0
         arr = (arr - _mean) / _std
         arr = arr.transpose(2, 0, 1)[np.newaxis].astype(np.float32)
-        logits = model.run(None, {"input": arr})[0]
+        input_name = model.get_inputs()[0].name
+        logits = model.run(None, {input_name: arr})[0]
         probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
         return float(probs[0, 1])
     # ultralytics

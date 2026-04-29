@@ -310,7 +310,10 @@ def _ort_session(ckpt_path: str, use_gpu: bool):
     import onnxruntime as ort
     providers = (["CUDAExecutionProvider", "CPUExecutionProvider"]
                  if use_gpu else ["CPUExecutionProvider"])
-    return ort.InferenceSession(ckpt_path, providers=providers)
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = 1
+    opts.inter_op_num_threads = 1
+    return ort.InferenceSession(ckpt_path, sess_options=opts, providers=providers)
 
 
 def load_mobilenet(ckpt_path: str, cpu_device: torch.device):

@@ -424,9 +424,12 @@ def infer_yolo(frame_path: Path, yolo_model, imgsz: int = 224) -> float:
     fmt, model = yolo_model
     if fmt == "onnx":
         from PIL import Image as PILImage
+        # Detect the input size the model was exported with
+        expected_h = model.get_inputs()[0].shape[2]
+        expected_w = model.get_inputs()[0].shape[3]
         _mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         _std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        img = PILImage.open(frame_path).convert("RGB").resize((imgsz, imgsz))
+        img = PILImage.open(frame_path).convert("RGB").resize((expected_w, expected_h))
         arr = np.array(img, dtype=np.float32) / 255.0
         arr = (arr - _mean) / _std
         arr = arr.transpose(2, 0, 1)[np.newaxis].astype(np.float32)

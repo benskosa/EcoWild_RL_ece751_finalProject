@@ -361,7 +361,7 @@ YOLOv8 standalone, OR ensemble, and LBP-gate → ensemble.
 **Step 1 — Sweep all 16 MobileNet configs:**
 ```bash
 chmod +x sequence_eval_mobilenet_sweep.sh
-./sequence_eval_mobilenet_sweep.sh --threshold 0.5
+./sequence_eval_mobilenet_sweep.sh --threshold 0.75
 ```
 
 **Step 2 — Identify the best MobileNet config:**
@@ -370,11 +370,17 @@ python smokeDetection_ourExperiments/summarize_sequence_eval.py \
     --eval_dir seq_eval_results --no_plots
 ```
 
+Sort by detection rate (default) to find the best `nf`/`gap` combo.
+
 **Step 3 — Final comparison: baseline ensemble vs. best MobileNet vs. gate pipeline:**
 ```bash
 chmod +x sequence_eval_final_comparison.sh
-# Replace 2 / 1 with the best n_frames / frame_gap from step 2
-./sequence_eval_final_comparison.sh --best_nf 2 --best_gap 1 --threshold 0.5
+# Replace 2 / 16 with the best n_frames / frame_gap from step 2
+./sequence_eval_final_comparison.sh \
+    --best_nf 2 --best_gap 16 \
+    --resnet_ckpt smokeDetection_baseline_ecoWild/Model/Pytorch/best_resnet34_model_epoch_3.pth \
+    --yolo_ckpt   smokeDetection_baseline_ecoWild/Model/Pytorch/yolov8l_cls_whole_golden_best.pt \
+    --threshold 0.75
 ```
 
 This evaluates three pipelines side by side:
@@ -382,9 +388,15 @@ This evaluates three pipelines side by side:
 2. Best LBP+MobileNet standalone
 3. LBP+MobileNet gate → OR ensemble
 
+The gate pipeline has two modes (selected automatically based on `--gate_from_start`):
+- **`gate_from_window`** (default): ensemble searches from the frame where MobileNet fired
+- **`gate_from_start`**: ensemble searches from the first post-ignition frame once MobileNet fires
+
 Outputs per run:
-- `seq_eval_results/<run>/sequence_summary.json` — aggregate stats
-- `seq_eval_results/<run>/<pipeline>_per_sequence.csv` — per-sequence rows
+- `seq_eval_results/<run>/sequence_summary.json` — aggregate stats (detection rate,
+  mean/median/min/max time to detection, gate breakdown for gate pipelines)
+- `seq_eval_results/<run>/<pipeline>_per_sequence.csv` — per-sequence rows with
+  `sequence`, `detected`, `first_detection_s`, and `mob_gate_s` (gate pipelines only)
 
 **Step 4 — Heatmaps across the MobileNet sweep grid:**
 ```bash

@@ -44,6 +44,11 @@ Usage
 
 from __future__ import annotations
 
+import numpy as np
+# TensorRT 8.5 uses np.bool which was removed in NumPy 1.24 — patch it back
+if not hasattr(np, 'bool'):
+    np.bool = bool
+
 import argparse
 import json
 import re
@@ -340,6 +345,19 @@ def load_mobilenet(ckpt_path: str, cpu_device: torch.device):
     return ("torch", model), transform
 
 
+def _load_trt_engine(ckpt_path: str):
+    """Load a TensorRT engine from a .trt file. Returns (engine, context)."""
+    import tensorrt as trt
+    import pycuda.autoinit  # noqa: F401
+    TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+    runtime = trt.Runtime(TRT_LOGGER)
+    with open(ckpt_path, "rb") as f:
+        engine = runtime.deserialize_cuda_engine(f.read())
+    if engine is None:
+        raise RuntimeError(f"Failed to load TensorRT engine: {ckpt_path}")
+    return engine, engine.create_execution_context()
+
+
 def load_resnet(ckpt_path: str, gpu_device: torch.device):
     ext = Path(ckpt_path).suffix.lower()
 
@@ -348,7 +366,16 @@ def load_resnet(ckpt_path: str, gpu_device: torch.device):
         print(f"  ResNet34 loaded  : {ckpt_path}  (ONNX Runtime, device={gpu_device})")
         return ("onnx", session)
 
+    if ext in (".trt", ".engine"):
+        engine, context = _load_trt_engine(ckpt_path)
+        print(f"  ResNet34 loaded  : {ckpt_path}  (TensorRT, device={gpu_device})")
+        return ("trt", (engine, context))
+
     # .pt / .pth — PyTorch checkpoint
+    ckpt = torch.load(ckpt_path, map_location=gpu_device)
+    if isinstance(ckpt, dict):
+        sd = (ckpt.get("state_dict") or ckpt.get("model")
+              or ckpt.get("model_state_dict") or ckpt)
     else:
         sd = ckpt
     model = models.resnet34()
@@ -418,11 +445,27 @@ def infer_resnet(frame_path: Path, model_tuple, device) -> float:
     fmt, model = model_tuple
     img = Image.open(frame_path).convert("RGB")
     tensor = _resnet_transform(img).unsqueeze(0)
+
     if fmt == "onnx":
         arr = tensor.numpy()
         logits = model.run(None, {"input": arr})[0]
         probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
         return float(probs[0, 1])
+
+    if fmt == "trt":
+        import pycuda.driver as cuda
+        engine, context = model
+        arr = tensor.numpy().astype(np.float32)
+        # Allocate buffers
+        d_input  = cuda.mem_alloc(arr.nbytes)
+        output   = np.empty((1, 2), dtype=np.float32)
+        d_output = cuda.mem_alloc(output.nbytes)
+        cuda.memcpy_htod(d_input, arr)
+        context.execute_v2([int(d_input), int(d_output)])
+        cuda.memcpy_dtoh(output, d_output)
+        probs = np.exp(output) / np.exp(output).sum(axis=1, keepdims=True)
+        return float(probs[0, 1])
+
     # torch
     with torch.no_grad():
         logits = model(tensor.to(device))

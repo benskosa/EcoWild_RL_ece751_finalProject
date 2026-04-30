@@ -135,7 +135,66 @@ def plot_cumulative_energy(
 
 
 # ---------------------------------------------------------------------------
-# Plot 2: Total Wh/day bar chart
+# Plot 2: Per-frame energy over time (smoke + no-smoke side by side)
+# ---------------------------------------------------------------------------
+
+def plot_per_frame_energy(
+    data: dict[str, dict[str, pd.DataFrame]],
+    out_path: Path,
+    frames_per_minute: float = 1.0,
+    smooth_window: int = 5,
+) -> None:
+    """
+    Two subplots side by side: no-smoke (left) and smoke (right).
+    Each line is a pipeline. Energy per frame in mJ, x-axis in minutes.
+    Lines are lightly smoothed with a rolling mean for readability.
+    """
+    sequences = [("no_smoke", "No-smoke sequence"), ("smoke", "Smoke sequence")]
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=False)
+
+    for ax, (seq, seq_title) in zip(axes, sequences):
+        any_plotted = False
+        for pipeline, seq_dict in data.items():
+            if seq not in seq_dict:
+                continue
+            df = seq_dict[seq].copy()
+            if "total_energy_mj" not in df.columns:
+                continue
+
+            style = PIPELINE_STYLES.get(pipeline, {"color": "gray",
+                                                    "linestyle": "-",
+                                                    "label": pipeline})
+            time_min = df["frame_idx"] / frames_per_minute
+            energy_mj = (df["total_energy_mj"]
+                         .rolling(window=smooth_window, min_periods=1, center=True)
+                         .mean())
+
+            ax.plot(time_min, energy_mj,
+                    color=style["color"],
+                    linestyle=style["linestyle"],
+                    linewidth=1.8,
+                    alpha=0.9,
+                    label=style["label"])
+            any_plotted = True
+
+        ax.set_title(seq_title, fontsize=12, fontweight="bold")
+        ax.set_xlabel("Time (minutes)", fontsize=10)
+        ax.set_ylabel("Energy per frame (mJ)", fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(20))
+        if any_plotted:
+            ax.legend(fontsize=8, loc="upper right")
+
+    fig.suptitle("Per-frame Energy Consumption by Pipeline",
+                 fontsize=13, fontweight="bold", y=1.02)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# Plot 3: Total Wh/day bar chart
 # ---------------------------------------------------------------------------
 
 def plot_wh_per_day(
@@ -224,6 +283,9 @@ def main() -> None:
     parser.add_argument("--sequences", nargs="+", default=["smoke", "no_smoke"],
                         choices=["smoke", "no_smoke"],
                         help="Which sequences to plot cumulative energy for")
+    parser.add_argument("--exclude_pipelines", nargs="+", default=[],
+                        help="Pipelines to exclude from all plots "
+                             "(e.g. --exclude_pipelines gate_from_start)")
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
@@ -244,6 +306,12 @@ def main() -> None:
     print(f"Found pipelines : {list(data.keys())}")
     print(f"Output dir      : {out_dir}\n")
 
+    # Filter out excluded pipelines
+    if args.exclude_pipelines:
+        for p in args.exclude_pipelines:
+            data.pop(p, None)
+        print(f"Excluded        : {args.exclude_pipelines}")
+
     # Plot 1: Cumulative energy over time (one plot per sequence)
     for seq in args.sequences:
         plot_cumulative_energy(
@@ -251,7 +319,10 @@ def main() -> None:
             out_dir / f"cumulative_energy_{seq}.png",
         )
 
-    # Plot 2: Wh/day bar chart
+    # Plot 2: Per-frame energy over time (smoke + no-smoke side by side)
+    plot_per_frame_energy(data, out_dir / "per_frame_energy.png")
+
+    # Plot 3: Wh/day bar chart
     plot_wh_per_day(data, out_dir / "wh_per_day.png")
 
     print("\nAll plots saved.")

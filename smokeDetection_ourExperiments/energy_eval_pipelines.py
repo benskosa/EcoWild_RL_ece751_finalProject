@@ -368,13 +368,22 @@ def load_yolo(ckpt_path: str):
         print(f"  YOLOv8 loaded    : {ckpt_path}  (ONNX Runtime)")
         return ("onnx", session)
 
-    # .pt / .trt — use ultralytics
+    # .pt / .trt / .engine — use ultralytics
     import functools
     from ultralytics import YOLO
+
+    # Ultralytics requires .engine extension for TensorRT; rename .trt → .engine
+    load_path = ckpt_path
+    if ext == ".trt":
+        engine_path = Path(ckpt_path).with_suffix(".engine")
+        if not engine_path.exists():
+            engine_path.symlink_to(Path(ckpt_path).resolve())
+        load_path = str(engine_path)
+
     orig = torch.load
     torch.load = functools.partial(orig, weights_only=False)
     try:
-        model = YOLO(ckpt_path)
+        model = YOLO(load_path, task="classify")
     finally:
         torch.load = orig
     print(f"  YOLOv8 loaded    : {ckpt_path}  (Ultralytics)")

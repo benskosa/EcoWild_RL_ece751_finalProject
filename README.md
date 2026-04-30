@@ -42,6 +42,11 @@ EcoWild_RL_ece751_finalProject/
 ├── README.md                          ← you are here
 ├── .gitignore
 │
+├── sequence_eval.py                   ← sequence-level eval (detection rate, time to detection)
+├── sequence_eval_final_comparison.sh  ← runs 3 pipelines side-by-side (smoke seqs only)
+├── pipeline_classifier_eval.py        ← sequence-level Accuracy/TPR/FPR (smoke + no_smoke)
+├── classifier_eval_final_comparison.sh← wrapper for pipeline_classifier_eval.py
+│
 ├── smokeDetection_baseline_ecoWild/   ← baseline models (ResNet34 + YOLOv8)
 │   ├── Dataset/                       ← shared dataset (gitignored)
 │   │   ├── train/  smoke/  <fire_id>/*.jpg
@@ -407,9 +412,50 @@ python smokeDetection_ourExperiments/summarize_sequence_eval.py \
 Produces `seq_eval_results/plots/heatmap_det_rate.png`,
 `heatmap_mean_time.png`, `heatmap_median_time.png`.
 
+**Step 5 — Sequence-level Accuracy, TPR, and FPR for the final pipelines:**
+
+`sequence_eval_final_comparison.sh` only evaluates smoke sequences, so it
+reports detection rate (= TPR) but cannot compute FPR or Accuracy. To get all
+three metrics, run `classifier_eval_final_comparison.sh`, which additionally
+evaluates every pipeline on the `no_smoke/` sequences:
+
+- Smoke sequence detected → **TP**; not detected → **FN**
+- No-smoke sequence triggered → **FP**; not triggered → **TN**
+
+```bash
+chmod +x classifier_eval_final_comparison.sh
+./classifier_eval_final_comparison.sh --best_nf 2 --best_gap 16 --threshold 0.5
+```
+
+Output: `pipeline_classifier_results/classifier_metrics.json`
+
+You can also call the underlying script directly to evaluate a subset of pipelines:
+
+```bash
+python pipeline_classifier_eval.py \
+    --data_root   smokeDetection_baseline_ecoWild/Dataset/test \
+    --resnet_ckpt smokeDetection_baseline_ecoWild/Train/checkpoints/resnet34_baseline_best_acc.pt \
+    --yolo_ckpt   smokeDetection_baseline_ecoWild/Train/runs/yolov8n_baseline/weights/best.pt \
+    --threshold   0.5 \
+    --out_dir     pipeline_classifier_results
+```
+
 ---
 
 ## 6. Visualization Tools
+
+### Detection rate grid (MobileNet sweep)
+
+Plots a colour-coded `n_frames × frame_gap` grid from `seq_eval_results`, with
+each cell annotated as both a percentage and a fraction (detected / total smoke
+sequences):
+
+```bash
+python smokeDetection_ourExperiments/plot_detection_rate_grid.py \
+    --eval_dir seq_eval_results
+```
+
+Output: `seq_eval_results/plots/detection_rate_grid.png`
 
 ### LBP-motion composite images
 
@@ -494,6 +540,8 @@ python plot_history.py \
 - [x] Sequence-level evaluation: detection rate + time to first detection (`sequence_eval.py`, `sequence_eval_sweep.sh`)
 - [x] Summarize sequence-level eval with table + heatmaps (`summarize_sequence_eval.py`)
 - [x] LBP gate → ResNet/YOLOv8 OR ensemble pipeline (implemented in `sequence_eval.py`)
+- [x] Sequence-level Accuracy/TPR/FPR across smoke + no_smoke sequences (`pipeline_classifier_eval.py`, `classifier_eval_final_comparison.sh`)
+- [x] Detection rate grid plot for MobileNet sweep (`plot_detection_rate_grid.py`)
 - [ ] Fill in Results tables in README once training/eval completes
 - [ ] Clarify energy metric definitions (E_comm, E_total, "min") from paper authors
 - [ ] Recreate Table 2 with final numbers

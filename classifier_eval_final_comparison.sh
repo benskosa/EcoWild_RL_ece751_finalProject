@@ -5,6 +5,7 @@
 #
 # Usage:
 #   ./classifier_eval_final_comparison.sh --best_nf 2 --best_gap 16 [--threshold 0.5]
+#   ./classifier_eval_final_comparison.sh --best_nf 2 --best_gap 16 --mobilenet_ckpt path/to/mob.pt
 
 set -e
 
@@ -22,14 +23,16 @@ YOLO_CKPT="$SCRIPT_DIR/smokeDetection_baseline_ecoWild/Train/runs/yolov8n_baseli
 THRESHOLD="0.5"
 BEST_NF=""
 BEST_GAP=""
+MOB_CKPT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --threshold)   THRESHOLD="$2"; shift 2 ;;
-        --best_nf)     BEST_NF="$2";   shift 2 ;;
-        --best_gap)    BEST_GAP="$2";  shift 2 ;;
-        --resnet_ckpt) RESNET_CKPT="$2"; shift 2 ;;
-        --yolo_ckpt)   YOLO_CKPT="$2";  shift 2 ;;
+        --threshold)      THRESHOLD="$2";  shift 2 ;;
+        --best_nf)        BEST_NF="$2";    shift 2 ;;
+        --best_gap)       BEST_GAP="$2";   shift 2 ;;
+        --mobilenet_ckpt) MOB_CKPT="$2";   shift 2 ;;
+        --resnet_ckpt)    RESNET_CKPT="$2"; shift 2 ;;
+        --yolo_ckpt)      YOLO_CKPT="$2";  shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -39,7 +42,10 @@ if [ -z "$BEST_NF" ] || [ -z "$BEST_GAP" ]; then
     exit 1
 fi
 
-MOB_CKPT="$SWEEP_CKPTS/nf${BEST_NF}_gap${BEST_GAP}/nf${BEST_NF}_gap${BEST_GAP}_best_acc.pt"
+# Use explicit checkpoint if provided, otherwise derive from nf/gap
+if [ -z "$MOB_CKPT" ]; then
+    MOB_CKPT="$SWEEP_CKPTS/nf${BEST_NF}_gap${BEST_GAP}/nf${BEST_NF}_gap${BEST_GAP}_best_acc.pt"
+fi
 
 echo "Threshold   : $THRESHOLD"
 echo "Best config : nf=${BEST_NF}  gap=${BEST_GAP}"

@@ -4,7 +4,9 @@ plot_energy_results.py
 Generates two visualisations from energy_eval_pipelines.py output:
 
   1. Cumulative energy over time (one line per pipeline, smoke + no-smoke)
-  2. Bar chart of total energy in Wh/day per pipeline
+  2. Per-frame energy over time (smoke + no-smoke side by side)
+  3. Bar chart of total Wh for the actual 3-hour sequence
+  4. Bar chart of total energy in Wh/day per pipeline (extrapolated)
 
 Usage
 -----
@@ -194,7 +196,70 @@ def plot_per_frame_energy(
 
 
 # ---------------------------------------------------------------------------
-# Plot 3: Total Wh/day bar chart
+# Plot 3: Total Wh bar chart (actual 3-hour sequence)
+# ---------------------------------------------------------------------------
+
+def plot_wh(
+    data: dict[str, dict[str, pd.DataFrame]],
+    out_path: Path,
+) -> None:
+    """
+    Bar chart of total Wh consumed during the actual 3-hour sequence
+    (no extrapolation).
+    """
+    sequences  = ["no_smoke", "smoke"]
+    seq_labels = {"no_smoke": "No-smoke sequence", "smoke": "Smoke sequence"}
+
+    pipelines = [p for p in PIPELINE_STYLES if p in data]
+    if not pipelines:
+        print("  No pipeline data found — skipping Wh plot.")
+        return
+
+    x      = np.arange(len(pipelines))
+    width  = 0.35
+    n_seq  = sum(1 for s in sequences if any(s in data[p] for p in pipelines))
+    offsets = np.linspace(-(n_seq - 1) * width / 2,
+                          (n_seq - 1) * width / 2, n_seq)
+
+    fig, ax = plt.subplots(figsize=(max(8, len(pipelines) * 1.6), 5))
+
+    for idx, seq in enumerate(sequences):
+        wh_vals = []
+        for pipeline in pipelines:
+            df = data[pipeline].get(seq)
+            if df is None or "total_energy_mj" not in df.columns or len(df) == 0:
+                wh_vals.append(0.0)
+                continue
+            total_j = df["total_energy_mj"].sum() / 1000.0
+            wh_vals.append(total_j / 3600.0)
+
+        bars = ax.bar(x + offsets[idx], wh_vals, width,
+                      label=seq_labels[seq],
+                      alpha=0.85,
+                      color=["#2196F3" if seq == "no_smoke" else "#F44336"] * len(pipelines))
+
+        for bar, val in zip(bars, wh_vals):
+            if val > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + 0.0001,
+                        f"{val:.4f}", ha="center", va="bottom", fontsize=8)
+
+    ax.set_title("Total Energy Consumption — 3-hour sequence",
+                 fontsize=13, fontweight="bold")
+    ax.set_ylabel("Energy (Wh)", fontsize=11)
+    ax.set_xticks(x)
+    ax.set_xticklabels([PIPELINE_STYLES.get(p, {}).get("label", p) for p in pipelines],
+                       rotation=15, ha="right", fontsize=9)
+    ax.legend(fontsize=10)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# Plot 4: Total Wh/day bar chart
 # ---------------------------------------------------------------------------
 
 def plot_wh_per_day(
@@ -322,7 +387,10 @@ def main() -> None:
     # Plot 2: Per-frame energy over time (smoke + no-smoke side by side)
     plot_per_frame_energy(data, out_dir / "per_frame_energy.png")
 
-    # Plot 3: Wh/day bar chart
+    # Plot 3: Wh bar chart (actual sequence total)
+    plot_wh(data, out_dir / "wh_total.png")
+
+    # Plot 4: Wh/day bar chart (extrapolated)
     plot_wh_per_day(data, out_dir / "wh_per_day.png")
 
     print("\nAll plots saved.")

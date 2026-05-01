@@ -45,7 +45,9 @@ EcoWild_RL_ece751_finalProject/
 ├── sequence_eval.py                   ← sequence-level eval (detection rate, time to detection)
 ├── sequence_eval_final_comparison.sh  ← runs 3 pipelines side-by-side (smoke seqs only)
 ├── pipeline_classifier_eval.py        ← sequence-level Accuracy/TPR/FPR (smoke + no_smoke)
-├── classifier_eval_final_comparison.sh← wrapper for pipeline_classifier_eval.py
+├── classifier_eval_final_comparison.sh← wrapper for pipeline_classifier_eval.py (3 pipelines)
+├── classifier_eval_mobilenet_sweep.sh ← runs pipeline_classifier_eval.py for all 16 sweep configs
+├── frame_classifier_eval.py           ← frame-level Accuracy/TPR/FPR (image-agnostic of sequence)
 │
 ├── smokeDetection_baseline_ecoWild/   ← baseline models (ResNet34 + YOLOv8)
 │   ├── Dataset/                       ← shared dataset (gitignored)
@@ -400,6 +402,30 @@ python smokeDetection_ourExperiments/summarize_sequence_eval.py \
 Produces `seq_eval_results/plots/heatmap_det_rate.png`,
 `heatmap_mean_time.png`, `heatmap_median_time.png`.
 
+**Step 4b — Add FPR and Accuracy to the sweep grid (requires no-smoke sequences):**
+
+`sequence_eval_mobilenet_sweep.sh` only evaluates smoke sequences, so the
+detection rate grids are the only ones available after step 4. To also get
+FPR and Accuracy grids, run the classifier sweep to add `classifier_metrics.json`
+to each sweep result directory:
+
+```bash
+chmod +x classifier_eval_mobilenet_sweep.sh
+./classifier_eval_mobilenet_sweep.sh --threshold 0.5
+```
+
+Then re-run the plot script to generate all three grids:
+
+```bash
+python smokeDetection_ourExperiments/plot_detection_rate_grid.py \
+    --eval_dir seq_eval_results
+```
+
+Produces:
+- `seq_eval_results/plots/detection_rate_grid.png` — TPR (always available)
+- `seq_eval_results/plots/fpr_grid.png` — FPR (requires step 4b)
+- `seq_eval_results/plots/accuracy_grid.png` — Accuracy (requires step 4b)
+
 **Step 5 — Sequence-level Accuracy, TPR, and FPR for the final pipelines:**
 
 `sequence_eval_final_comparison.sh` only evaluates smoke sequences, so it
@@ -530,6 +556,8 @@ python plot_history.py \
 - [x] LBP gate → ResNet/YOLOv8 OR ensemble pipeline (implemented in `sequence_eval.py`)
 - [x] Sequence-level Accuracy/TPR/FPR across smoke + no_smoke sequences (`pipeline_classifier_eval.py`, `classifier_eval_final_comparison.sh`)
 - [x] Detection rate grid plot for MobileNet sweep (`plot_detection_rate_grid.py`)
+- [x] FPR and Accuracy grid plots for MobileNet sweep (`classifier_eval_mobilenet_sweep.sh` + updated `plot_detection_rate_grid.py`)
+- [x] Frame-level classifier metrics eval (`frame_classifier_eval.py`)
 - [ ] Fill in Results tables in README once training/eval completes
 - [ ] Clarify energy metric definitions (E_comm, E_total, "min") from paper authors
 - [ ] Recreate Table 2 with final numbers
